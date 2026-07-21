@@ -1,9 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-METHOD_NAME="vggt"
+METHOD_NAME="vggt_ft"
 MODEL="vggt"
-CHECKPOINT="${CHECKPOINT:-checkpoints/vggt/model.pt}"
+CHECKPOINT="${CHECKPOINT:-experiments/dom/uav_training/vggt_finetuning_16v_6d_16ipg_2g/checkpoint-best.pth}"
+
+# The fine-tuned checkpoint is complete, so do not load the base VGGT weights
+# before applying it.
+LOAD_PRETRAINED_WEIGHTS="${LOAD_PRETRAINED_WEIGHTS:-0}"
 
 NORM_TYPE="${NORM_TYPE:-identity}"
 PATCH_SIZE="${PATCH_SIZE:-14}"

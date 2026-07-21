@@ -4,9 +4,9 @@
 # found in the LICENSE file in the root directory of this source tree.
 
 """
-Training Executable for MapAnything
+Training Executable for GeoFF3D
 
-This script serves as the main entry point for training models in the MapAnything project.
+This script serves as the main entry point for training models in the GeoFF3D project.
 It uses Hydra for configuration management and redirects all output to logging.
 
 Usage:
@@ -19,9 +19,9 @@ import sys
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from mapanything.utils.misc import StreamToLogger
-from mapanything.utils.torch_hub_setup import configure_torch_hub
-from mapanything.train.training import train
+from geoff3d.utils.misc import StreamToLogger
+from geoff3d.utils.torch_hub_setup import configure_torch_hub
+from geoff3d.train.training import train
 
 log = logging.getLogger(__name__)
 

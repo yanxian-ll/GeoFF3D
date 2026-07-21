@@ -20,7 +20,7 @@ world_rotation_prob: 1.0
 # has been removed.
 cam_prob: 0.0
 
-# Legacy MapAnything conditioning fields kept for compatibility.
+# Legacy GeoFF3D conditioning fields kept for compatibility.
 dropout_prob: 0
 depth_scale_norm_all_prob: 0
 pose_scale_norm_all_prob: 0

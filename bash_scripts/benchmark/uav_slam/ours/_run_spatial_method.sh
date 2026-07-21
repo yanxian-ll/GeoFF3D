@@ -307,8 +307,11 @@ import base64
 import json
 import os
 import re
+import signal
 import sys
 from pathlib import Path
+
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 
 scene_list = Path(sys.argv[1]).expanduser()
@@ -677,7 +680,16 @@ while IFS= read -r scene_entry_b64; do
   METHOD_NAME_RUN="$(param_required METHOD_NAME)"
   MODEL_RUN="$(param_required MODEL)"
   OUTPUT_BASE_RUN="$(param_default OUTPUT_BASE "$ROOT_DIR/outputs/spatial/${METHOD_NAME_RUN}")"
-  CHECKPOINT_RUN="$(param CHECKPOINT)"
+  CHECKPOINT_RUN="$(param_required CHECKPOINT)"
+  if [[ -n "$CHECKPOINT_RUN" && "$CHECKPOINT_RUN" != /* ]]; then
+    CHECKPOINT_RUN="$ROOT_DIR/$CHECKPOINT_RUN"
+  fi
+  if [[ -n "$CHECKPOINT_RUN" && ! -f "$CHECKPOINT_RUN" ]]; then
+    echo "[ERROR] Checkpoint file not found: $CHECKPOINT_RUN" >&2
+    echo "        Set CHECKPOINT to the fine-tuned checkpoint file before running:" >&2
+    echo "        CHECKPOINT=/absolute/path/to/checkpoint-best.pth bash $0 ..." >&2
+    exit 2
+  fi
   if [[ -n "$CLI_CUDA_DEVICE" ]]; then
     CUDA_DEVICE_RUN="$CLI_CUDA_DEVICE"
   else

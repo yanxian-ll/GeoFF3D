@@ -1,4 +1,4 @@
-# String for model factory (Options: "mapanything", "mapanything_ablations", "modular_dust3r", "vggt", "pi3")
+# String for model factory (Options: "geoff3d", "pi3x", "vggt")
 model_str: ???
 # Model config
 model_config:
@@ -8,7 +8,7 @@ model_config:
   load_specific_pretrained_submodules: False
   # List of submodules to load from the checkpoint (if load_specific_pretrained_submodules is True)
   specific_pretrained_submodules: []
-# Path of a starting checkpoint (to enable backward compatibility with original DUSt3R class)
+# Optional starting checkpoint.
 pretrained: null
 # Image normalization type
 data_norm_type: ???

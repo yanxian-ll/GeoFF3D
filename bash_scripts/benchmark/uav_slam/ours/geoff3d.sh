@@ -3,8 +3,8 @@ set -euo pipefail
 
 METHOD_NAME="geoff3d"
 MODEL="geoff3d"
-# CHECKPOINT="${CHECKPOINT:-experiments/dom/uav_training/pi3x_zup_translation_yaw_aug_8v_6d_16ipg_2g/checkpoint-last.pth}"
-CHECKPOINT="${CHECKPOINT:-experiments/dom/uav_training/pi3x_zup_translation_yaw_aug_8v_6d_16ipg_2g_stage2/checkpoint-best.pth}"
+# CHECKPOINT="${CHECKPOINT:-experiments/dom/uav_training/geoff3d_stage1/checkpoint-last.pth}"
+CHECKPOINT="${CHECKPOINT:-experiments/dom/uav_training/geoff3d_stage2/checkpoint-best.pth}"
 
 
 

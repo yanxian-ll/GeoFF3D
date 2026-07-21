@@ -3,11 +3,11 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mapanything"
-version = "1.1"
-description = "Universal Feed-Forward Metric 3D Reconstruction"
-readme = "readme.md"
-authors = [{ name = "Nikhil Keetha", email = "keethanikhil@gmail.com" }]
+name = "geoff3d"
+version = "0.1.0"
+description = "Feed-forward 3D reconstruction for UAV imagery with geometric priors"
+readme = "README.md"
+authors = [{ name = "yanxian" }]
 requires-python = ">=3.10.0"
 dependencies = [
     "huggingface_hub",
@@ -27,30 +27,22 @@ dependencies = [
     "tqdm",
     "trimesh",
     "uniception==0.1.6",
-    "fastapi>=0.110,<1",
-    "pydantic>=2.7,<3",
-    "pydantic-core>=2.27,<3",
-    "starlette>=0.37,<1",
 ]
 
 [project.optional-dependencies]
 data = ["pandas"]
 dev = ["pre-commit", "pytest", "pytest-cov", "ruff"]
-gradio = ["gradio==5.47.2", "spaces"]
-radio = ["timm"]
 all = [
-    "mapanything[data]",
-    "mapanything[dev]",
-    "mapanything[gradio]",
-    "mapanything[radio]",
+    "geoff3d[data]",
+    "geoff3d[dev]",
 ]
 
 # Setuptools configuration
 [tool.setuptools.packages.find]
-include = ["mapanything*", "slam*"]
+include = ["geoff3d*"]
 
 [tool.setuptools.package-data]
-"mapanything" = ["**/*"]
+"geoff3d" = ["**/*"]
 
 [tool.ruff]
 lint.extend-select = ["I"]
@@ -61,4 +53,4 @@ case-sensitive = false
 combine-as-imports = true
 detect-same-package = false
 order-by-type = false
-known-first-party = ["mapanything", "uniception"]
+known-first-party = ["geoff3d", "uniception"]

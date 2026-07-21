@@ -4,7 +4,7 @@ defaults:
 # Root directory containing all datasets
 root_data_dir: "../../dataset/data"
 # Dataset metadata directory
-mapanything_dataset_metadata_dir: "../../dataset/data/metadata"
+geoff3d_dataset_metadata_dir: "../../dataset/data/metadata"
 # Root directory containing pretrained checkpoints for custom models
 root_pretrained_checkpoints_dir: "./checkpoints"
 # Root directory to log experiments

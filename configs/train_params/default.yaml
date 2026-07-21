@@ -54,7 +54,7 @@ resume: True
 check_loss_instability: True
 # Maximum loss value threshold for detecting training instability
 max_loss_value: 1000
-# Preserve legacy MapAnything behavior by default. AnySplat-style render
+# Preserve legacy GeoFF3D behavior by default. AnySplat-style render
 # training disables this because its losses are already averaged over views.
 scale_loss_by_num_views: True
 

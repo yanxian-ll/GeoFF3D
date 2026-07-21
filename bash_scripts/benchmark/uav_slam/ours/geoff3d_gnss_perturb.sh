@@ -3,7 +3,7 @@ set -euo pipefail
 
 METHOD_NAME="geoff3d_gnss_perturb"
 MODEL="geoff3d"
-CHECKPOINT="${CHECKPOINT:-${STAGE2_CHECKPOINT:-experiments/dom/uav_training/pi3x_zup_translation_yaw_aug_8v_6d_16ipg_2g_stage2/checkpoint-best.pth}}"
+CHECKPOINT="${CHECKPOINT:-${STAGE2_CHECKPOINT:-../map-anything/experiments/dom/uav_training/pi3x_zup_translation_yaw_aug_8v_6d_16ipg_2g_stage2/checkpoint-best.pth}}"
 
 # A complete GeoFF3D checkpoint already contains the model weights. Avoid
 # loading the 5+ GB base Pi3X weights before applying the checkpoint.

@@ -23,13 +23,13 @@ from typing import Dict, Sequence
 
 import torch
 
-from spatial_rrd.metrics import (
+from geoff3d.spatial_rrd.metrics import (
     compute_aligned_metrics,
     load_eval_outputs,
     parse_float_list,
     parse_int_list,
 )
-from spatial_rrd.scene_io import build_views_from_scene
+from geoff3d.spatial_rrd.scene_io import build_views_from_scene
 
 
 def restrict_meta_to_stems(meta: Dict[str, object], stems: Sequence[str]) -> Dict[str, object]:

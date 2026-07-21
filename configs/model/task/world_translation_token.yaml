@@ -1,8 +1,0 @@
-defaults:
-  - default
-
-# Translation, rotation, and FOV are sampled independently after the scene gate.
-overall_prob: 1.0
-world_translation_prob: 1.0
-world_rotation_prob: 1.0
-fov_prob: 1.0

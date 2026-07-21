@@ -1,30 +1,14 @@
 defaults:
   - resolution_options: default
-  - ase_wai: default
   - blendedmvs_wai: default
-  - dl3dv_wai: default
-  - dynamicreplica_wai: default
-  - eth3d_wai: default
-  - megadepth_wai: default
-  - mpsd_wai: default
-  - mvs_synth_wai: default
-  - paralleldomain4d_wai: default
-  - sailvos3d_wai: default
-  - spring_wai: default
-  - tav2_wb_wai: default
-  - unrealstereo4k_wai: default
   - whu_whuomvs_wai: default
   - uavscenes_wai: default
   - a3dreal_wai: default
   - a3dsynl_wai: default
-  - a3dsynl_fa_wai: default
   - a3dsyns_wai: default
-  - a3dscenes_depth_completion_wai: default
-  - a3dscenes_instance_wai: default
   - usegeo_wai: default
   - urbanscene3d_wai: default
   - enrich_wai: default
-  - npu_dronemap_wai: default
 
 # Training Set, For example: BlendedMVS(split='train', resolution=(512, 384), transform=...)
 train_dataset: ???

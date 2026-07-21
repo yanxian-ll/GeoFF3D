@@ -1,9 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-METHOD_NAME="pi3x"
+METHOD_NAME="pi3x_ft"
 MODEL="pi3x"
-CHECKPOINT="${CHECKPOINT:-checkpoints/pi3x}"
+CHECKPOINT="${CHECKPOINT:-experiments/dom/uav_training/pi3x_finetuning_16v_6d_16ipg_2g_mvs/checkpoint-best.pth}"
+
+# The fine-tuned checkpoint is complete, so do not load the base Pi3X weights
+# before applying it.
+LOAD_PRETRAINED_WEIGHTS="${LOAD_PRETRAINED_WEIGHTS:-0}"
 
 NORM_TYPE="${NORM_TYPE:-identity}"
 PATCH_SIZE="${PATCH_SIZE:-14}"

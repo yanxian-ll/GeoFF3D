@@ -27,7 +27,7 @@ transform: 'colorjitter+grayscale+gaublur'
 data_norm_type: ${model.data_norm_type}
 image_transform_mode: ${dataset.train.image_transform_mode}
 ROOT: ${root_data_dir}/uavscenes
-dataset_metadata_dir: ${mapanything_dataset_metadata_dir}
+dataset_metadata_dir: ${geoff3d_dataset_metadata_dir}
 overfit_num_sets: null
 variable_num_views: ${dataset.train.variable_num_views}
 num_views: ${dataset.num_views}

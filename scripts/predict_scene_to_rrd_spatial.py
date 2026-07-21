@@ -48,12 +48,12 @@ try:
 except Exception:  # pragma: no cover - tqdm is optional at runtime
     tqdm = None
 
-from spatial_rrd.scene_io import (
+from geoff3d.spatial_rrd.scene_io import (
     build_views_from_scene,
     load_chunk_views_from_scene,
     resolve_device,
 )
-from spatial_rrd.chunk_cache import (
+from geoff3d.spatial_rrd.chunk_cache import (
     AsyncChunkCacheWriter,
     chunk_cache_dir_for_output,
     load_chunk_cache,
@@ -61,14 +61,13 @@ from spatial_rrd.chunk_cache import (
     update_chunk_cache,
     write_chunk_record_manifest,
 )
-from spatial_rrd.chunking import (
+from geoff3d.spatial_rrd.chunking import (
     CHUNK_ORDER_STRATEGIES,
     SPATIAL_PARTITIONS,
     build_spatial_chunks,
     order_spatial_chunks,
 )
-from spatial_rrd.model_runner import (
-    VGGT_OMEGA_MODELS,
+from geoff3d.spatial_rrd.model_runner import (
     collect_pred_outputs,
     init_model_from_hydra,
     load_checkpoint,
@@ -87,7 +86,7 @@ from spatial_rrd.model_runner import (
     filter_views_for_prior_policy,
     apply_runtime_prior_policy,
 )
-from spatial_rrd.geometry_align import (
+from geoff3d.spatial_rrd.geometry_align import (
     normalize_align_mode,
     maybe_recenter_anchor_from_meta,
     restore_predictions_from_recenter,
@@ -97,31 +96,31 @@ from spatial_rrd.geometry_align import (
     resolve_recenter_mode,
     POSE_TRANSLATION_ALIGN_MODES,
 )
-from spatial_rrd.rrd_writer import (
+from geoff3d.spatial_rrd.rrd_writer import (
     dedupe_cameras_by_stem,
     save_spatial_rrd,
     input_pose_centers_by_stem,
 )
-from spatial_rrd.multiview_consistency import (
+from geoff3d.spatial_rrd.multiview_consistency import (
     intrinsics_from_views,
     apply_mvsnet_style_multiview_filter,
 )
-from spatial_rrd.pose_perturb import perturb_scene_camera_poses
-from spatial_rrd.gsplat_bundle import (
+from geoff3d.spatial_rrd.pose_perturb import perturb_scene_camera_poses
+from geoff3d.spatial_rrd.gsplat_bundle import (
     build_gsplat_optimization_bundles,
     collect_gsplat_bundle_inputs,
 )
-from spatial_rrd.gsplat_refine import optimize_and_save_gsplat_bundle
-from spatial_rrd.orthodom import (
+from geoff3d.spatial_rrd.gsplat_refine import optimize_and_save_gsplat_bundle
+from geoff3d.spatial_rrd.orthodom import (
     render_orthodom_from_fused_points,
     render_orthodom_from_gsplat_summary,
 )
-from spatial_rrd.chunk_post_align import (
+from geoff3d.spatial_rrd.chunk_post_align import (
     apply_deferred_chunk_post_alignment,
     compute_adjacent_chunk_seam_error,
 )
-from spatial_rrd.chunk_artifacts import make_chunk_color_lookup
-from spatial_rrd.chunk_transform import (
+from geoff3d.spatial_rrd.chunk_artifacts import make_chunk_color_lookup
+from geoff3d.spatial_rrd.chunk_transform import (
     compose_record_similarity,
     get_transformed_cameras,
 )
@@ -381,7 +380,7 @@ def parse_args() -> argparse.Namespace:
     )
     g.add_argument(
         "--model", required=True,
-        help="模型 Hydra 配置名。支持 geoff3d pi3x vggt mapanything da3 等",
+        help="模型 Hydra 配置名。支持 geoff3d、pi3x、vggt。",
     )
 
     # ╔══════════════════════════════════════════════════════════════════
@@ -1099,7 +1098,7 @@ def parse_args() -> argparse.Namespace:
         "--pose_prior",
         default="auto",
         choices=["auto", "input", "none"],
-        help="完整 pose 先验，仅用于 mapanything / pi3x / da3 这类支持输入先验的模型。",
+        help="完整 pose 先验，仅用于 geoff3d / pi3x 这类支持输入先验的模型。",
     )
 
     g2.add_argument(

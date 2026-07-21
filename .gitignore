@@ -11,7 +11,7 @@ hydra/
 private/
 .ruff_cache/
 experiments/
-mapanything.egg-info/
+geoff3d.egg-info/
 
 # Model weights and training snapshots
 *.pth
@@ -38,7 +38,8 @@ visualizations/
 multirun/
 events.out.tfevents.*
 slurm-*.out
-core.*
+core
+core.[0-9]*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -214,3 +215,4 @@ Thumbs.db
 
 # pdf
 *.pdf
+.venv-rerun-vscode/
