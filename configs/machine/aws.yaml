@@ -1,0 +1,19 @@
+defaults:
+  - default
+
+# Root directory containing all datasets
+root_data_dir: "../../dataset/data"
+# Dataset metadata directory
+mapanything_dataset_metadata_dir: "../../dataset/data/metadata"
+# Root directory containing pretrained checkpoints for custom models
+root_pretrained_checkpoints_dir: "./checkpoints"
+# Root directory to log experiments
+root_experiments_dir: "./experiments"
+# Root directory containing UniCeption pretrained checkpoints
+root_uniception_pretrained_checkpoints_dir: "./uniception_checkpoints"
+# Root directory containing external benchmark data 
+external_benchmark_data_root_data_dir: "../../dataset/data/rmvd_mvs_benchmark/rmvd_test_data"
+
+torch_hub_disable_download: true
+torch_hub_dir: ${machine.root_pretrained_checkpoints_dir}/torch_cache/hub
+local_dino_repo: ${machine.torch_hub_dir}/facebookresearch_dinov2_main

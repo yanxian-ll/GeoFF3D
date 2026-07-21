@@ -1,0 +1,12 @@
+defaults:
+  - default
+
+lr: 1e-05
+min_lr: 1e-07
+
+submodule_configs:
+  backbone:
+    lr: 5e-07
+    min_lr: 5e-09
+
+    

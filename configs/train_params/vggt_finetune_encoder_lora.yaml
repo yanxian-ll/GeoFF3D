@@ -1,0 +1,32 @@
+# Example: Pi3 encoder-only Fin3R-style LoRA
+# This uses the same unified submodule_configs mechanism as the lr system.
+# PEFT will search for all qkv modules under encoder and only those receive LoRA.
+
+defaults:
+  - default
+  - lora@lora_defaults: default
+  - _self_
+  
+submodule_configs:
+  model.aggregator.patch_embed:
+    lr: 1.0e-4
+    min_lr: 1.0e-6
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+    lora:
+      enabled: true
+
+  model.aggregator.frame_blocks:
+    lr: 0
+  model.aggregator.global_blocks:
+    lr: 0
+    
+  model.camera_head:
+    lr: 0
+  model.point_head:
+    lr: 0
+  model.depth_head:
+    lr: 0
+  model.track_head:
+    lr: 0

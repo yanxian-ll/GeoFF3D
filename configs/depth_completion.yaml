@@ -1,0 +1,48 @@
+defaults:
+  - machine: aws
+  - model: mapanything_v1
+  - override model/task: depth_completion
+  - _self_
+
+root_data_dir: ${machine.root_data_dir}
+root_experiments_dir: ${machine.root_experiments_dir}
+
+model:
+  pretrained: '${root_experiments_dir}/mapanything/training/mapa_finetuning_depth_completion_v3/checkpoint-last.pth'
+  task:
+    depth_completion:
+      mvs_mask_prob: 1.0   
+      sparse_depth_prob: 1.0 
+      sparsification_removal_percent: 0.5
+
+hydra:
+  run:
+    dir: '${root_experiments_dir}/mapanything/depth_completion/a3dscenes/heize_70M_v3'   # 此路径在批量处理时会被覆盖，可留作默认
+output_dir: ${hydra:run.dir}
+
+gpu_id: 0
+batch_size: 8
+save_exr: true
+save_png: false
+
+# 推理分辨率（W,H）
+resolution: [1022, 630]
+# resolution: [518, 336]
+
+# 对齐模式：scale | affine
+align_mode: "affine"
+depth_thresholds: [0.5, 1.0, 2.0, 5.0]
+
+dataset_root: ${root_data_dir}/a3dscenes
+# scene_name 字段在批量处理时会被忽略，程序将自动扫描 dataset_root 下的所有子目录
+# scene_name: "heize_70M"
+modalities: ["image", "depth", "mask"]
+
+### Benchmarking args
+seed: 0
+disable_cudnn_benchmark: true
+amp: 1
+amp_dtype: "bf16"
+
+transform: "imgnorm"
+data_norm_type: "dinov2"

@@ -1,0 +1,105 @@
+# Z-up world-translation-prior loss for GeoFF3D.
+#
+# Target:
+#   - z axis is fixed as world up.
+#   - input world_translation anchors the output coordinate frame.
+#   - xy yaw should be learned from image evidence + translation layout.
+#   - rotation prior can be absent at input time, but GT rotation still supervises
+#     predicted camera orientation during training.
+
+train_criterion: |
+  0.5 * ExcludeTopNPercentPixelLoss(
+    FactoredGeometryRegr3DPlusNormalGMLoss(
+      RobustRegressionLoss(alpha=0.5, scaling_c=0.05),
+      norm_mode='avg_dis',
+      depth_type_for_loss='depth_z',
+      loss_in_log=True,
+      flatten_across_image_only=True,
+      compute_pairwise_relative_pose_loss=True,
+      convert_predictions_to_view0_frame=True,
+      compute_world_frame_points_loss=True,
+      apply_normal_and_gm_loss_to_synthetic_data_only=True,
+      normal_loss_weight=3.0,
+      gm_loss_weight=3.0
+    ),
+    top_n_percent=5,
+    apply_to_real_data_only=True,
+    loss_set_indices=[0, 1, 2]
+  ) + 1.0 * ExcludeTopNPercentPixelLoss(
+    WorldFramePointsRegr3D(
+      RobustRegressionLoss(alpha=0.5, scaling_c=0.05),
+      norm_mode='avg_dis',
+      loss_in_log=False,
+      flatten_across_image_only=True,
+      detach_world_frame_points_geometry=True,
+      detach_world_frame_points_translation=False,
+      world_frame_points_loss_weight=1.0
+    ),
+    top_n_percent=5,
+    apply_to_real_data_only=True,
+    loss_set_indices=[0]
+  ) + 0.2 * WorldFramePoseLoss(
+    FactoredLLoss(
+      reduction='mean',
+      pose_trans_loss_type='l1',
+      pose_quats_loss_type='l1'
+    ),
+    norm_mode='avg_dis',
+    depth_type_for_loss='depth_z',
+    pose_trans_loss_weight=2.0,
+    pose_trans_loss_weight_schedule={
+      'start_weight': 0.0,
+      'end_weight': 2.0,
+      'warmup_steps': args.train_params.raw_translation_loss_warmup_steps,
+      'start_step': args.train_params.raw_translation_loss_start_step,
+      'schedule': args.train_params.raw_translation_loss_schedule
+    },
+    pose_quats_loss_weight=1.0,
+    compute_absolute_pose_loss=True,
+    compute_pairwise_relative_pose_loss=True
+  )
+
+test_criterion: |
+  0.5 * ExcludeTopNPercentPixelLoss(
+    FactoredGeometryRegr3DPlusNormalGMLoss(
+      RobustRegressionLoss(alpha=0.5, scaling_c=0.05),
+      norm_mode='avg_dis',
+      depth_type_for_loss='depth_z',
+      loss_in_log=True,
+      flatten_across_image_only=True,
+      compute_pairwise_relative_pose_loss=True,
+      convert_predictions_to_view0_frame=True,
+      compute_world_frame_points_loss=True,
+      apply_normal_and_gm_loss_to_synthetic_data_only=True,
+      normal_loss_weight=3.0,
+      gm_loss_weight=3.0
+    ),
+    top_n_percent=5,
+    apply_to_real_data_only=True,
+    loss_set_indices=[0, 1, 2]
+  ) + 1.0 * ExcludeTopNPercentPixelLoss(
+    WorldFramePointsRegr3D(
+      RobustRegressionLoss(alpha=0.5, scaling_c=0.05),
+      norm_mode='avg_dis',
+      loss_in_log=False,
+      flatten_across_image_only=True,
+      detach_world_frame_points_geometry=True,
+      detach_world_frame_points_translation=False,
+      world_frame_points_loss_weight=1.0
+    ),
+    top_n_percent=5,
+    apply_to_real_data_only=True,
+    loss_set_indices=[0]
+  ) + 0.2 * WorldFramePoseLoss(
+    FactoredLLoss(
+      reduction='mean',
+      pose_trans_loss_type='l1',
+      pose_quats_loss_type='l1'
+    ),
+    norm_mode='avg_dis',
+    depth_type_for_loss='depth_z',
+    pose_trans_loss_weight=2.0,
+    pose_quats_loss_weight=1.0,
+    compute_absolute_pose_loss=True,
+    compute_pairwise_relative_pose_loss=True
+  )

@@ -1,0 +1,36 @@
+
+train_criterion: |
+  DA3FineTuneLoss(
+    lambda_depth=1.0,
+    lambda_depth_grad=1.0,
+    lambda_ray=1.0,
+    lambda_ray_origin=1.0,
+    lambda_ray_direction=1.0,
+    lambda_point=1.0,
+    lambda_camera=1.0,
+    lambda_camera_rot=1.0,
+    lambda_camera_trans=1.0,
+    lambda_camera_intr=1.0,
+    lambda_camera_fov=1.0,
+    norm_mode="avg_dis",
+    robust_beta=0.05,
+    conf_reg_alpha=0.1,
+  )
+
+test_criterion: |
+  DA3FineTuneLoss(
+    lambda_depth=1.0,
+    lambda_depth_grad=1.0,
+    lambda_ray=1.0,
+    lambda_ray_origin=1.0,
+    lambda_ray_direction=1.0,
+    lambda_point=1.0,
+    lambda_camera=1.0,
+    lambda_camera_rot=1.0,
+    lambda_camera_trans=1.0,
+    lambda_camera_intr=0.0,
+    lambda_camera_fov=1.0,
+    norm_mode="avg_dis",
+    robust_beta=0.05,
+    conf_reg_alpha=0.1,
+  )

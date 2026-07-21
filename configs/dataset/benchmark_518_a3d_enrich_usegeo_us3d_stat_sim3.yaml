@@ -1,0 +1,94 @@
+defaults:
+  - default
+
+# Dataset config dedicated to Sim(3) rotation/scale statistics.
+# It contains both test_dataset and train_dataset, so the same config can be used
+# with alignment_stats.split=test or alignment_stats.split=train.
+# The original benchmark_518_a3d_enrich_usegeo_us3d.yaml is intentionally untouched.
+
+num_views: 2
+principal_point_centered: false
+
+covisibility_thres_min: 0.3
+covisibility_thres_max: 1.0
+sampling_mode: "random_walk"
+
+# Test resolutions match benchmark_518_a3d_enrich_usegeo_us3d.yaml.
+resolution_test_a3dreal: ${dataset.resolution_options.518_1_52_ar}
+resolution_test_a3dsynl: ${dataset.resolution_options.518_1_52_ar}
+resolution_test_usegeo: ${dataset.resolution_options.518_1_33_ar}
+resolution_test_urbanscene3d: ${dataset.resolution_options.518_1_33_ar}
+resolution_test_enrich: ${dataset.resolution_options.518_1_33_ar}
+
+# Train sub-dataset configs require resolution_train.
+resolution_train: ${dataset.resolution_options.518_1_33_ar}
+
+# Force train split statistics to behave like an evaluation pass:
+# fixed number of views and image normalization only.
+train:
+  variable_num_views: false
+  use_hfov_balanced_sampling: false
+
+test:
+  variable_num_views: false
+
+# Train datasets requested for Sim(3) statistics:
+# a3dreal_wai, a3dsynl_wai, a3dsyns_wai, blendedmvs_wai, uavscenes_wai, whu_whuomvs_wai.
+# These overrides remove training image augmentations and keep sampling deterministic/eval-like.
+a3dreal_wai:
+  train:
+    transform: 'imgnorm'
+    covisibility_thres: ${dataset.covisibility_thres_min}
+    covisibility_thres_max: ${dataset.covisibility_thres_max}
+    sampling_mode: ${dataset.sampling_mode}
+
+a3dsynl_wai:
+  train:
+    transform: 'imgnorm'
+    covisibility_thres: ${dataset.covisibility_thres_min}
+    covisibility_thres_max: ${dataset.covisibility_thres_max}
+    sampling_mode: ${dataset.sampling_mode}
+
+a3dsyns_wai:
+  train:
+    transform: 'imgnorm'
+    covisibility_thres: ${dataset.covisibility_thres_min}
+    covisibility_thres_max: ${dataset.covisibility_thres_max}
+    sampling_mode: ${dataset.sampling_mode}
+
+blendedmvs_wai:
+  train:
+    transform: 'imgnorm'
+    covisibility_thres: ${dataset.covisibility_thres_min}
+
+uavscenes_wai:
+  train:
+    transform: 'imgnorm'
+    covisibility_thres: ${dataset.covisibility_thres_min}
+    covisibility_thres_max: ${dataset.covisibility_thres_max}
+    sampling_mode: ${dataset.sampling_mode}
+
+whu_whuomvs_wai:
+  train:
+    transform: 'imgnorm'
+    covisibility_thres: ${dataset.covisibility_thres_min}
+    covisibility_thres_max: ${dataset.covisibility_thres_max}
+    sampling_mode: ${dataset.sampling_mode}
+
+# Test Set requested for Sim(3) statistics:
+# urbanscene3d_wai, usegeo_wai, a3dreal_wai, a3dsynl_fa_wai, enrich_wai.
+test_dataset:
+  "+ 10  @ ${dataset.urbanscene3d_wai.test.dataset_str}
+  + 10 @ ${dataset.usegeo_wai.test.dataset_str}
+  + 10 @ ${dataset.a3dreal_wai.test.dataset_str}
+  + 10 @ ${dataset.a3dsynl_fa_wai.test.dataset_str}
+  + 10 @ ${dataset.enrich_wai.test.dataset_str}"
+
+# Train Set requested for Sim(3) statistics.
+train_dataset:
+  "+ 20 @ ${dataset.a3dreal_wai.train.dataset_str}
+  + 20 @ ${dataset.a3dsynl_wai.train.dataset_str}
+  + 20 @ ${dataset.a3dsyns_wai.train.dataset_str}
+  + 20 @ ${dataset.blendedmvs_wai.train.dataset_str}
+  + 10 @ ${dataset.uavscenes_wai.train.dataset_str}
+  + 5 @ ${dataset.whu_whuomvs_wai.train.dataset_str}"

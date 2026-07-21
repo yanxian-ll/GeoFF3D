@@ -1,0 +1,27 @@
+defaults:
+  - default
+  - task: images_only
+
+# String for model factory
+model_str: "pi3x"
+# Model config
+model_config:
+  name: "pi3x"
+  # Load pre-trained weights
+  load_pretrained_weights: true
+  # Geometric input config
+  geometric_input_config: ${model.task}
+  # PI3 model name or path
+  pretrained_model_name_or_path: "checkpoints/pi3x"
+  # Whether to use gradient checkpointing in Pi3
+  gradient_checkpointing: true
+  # 是否允许条件注入
+  use_conditioning: true
+  # 是否启用 Pi3X 的多模态条件分支
+  use_multimodal: true
+# Image Normalization Type
+data_norm_type: "identity"
+# Pi3 checkpoint is already loaded in the inference wrapper
+pretrained: null
+# Torch hub force reload
+torch_hub_force_reload: False

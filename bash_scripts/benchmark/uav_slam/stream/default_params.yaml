@@ -1,0 +1,41 @@
+# Default parameters for streaming UAV benchmark methods.
+#
+# This file is loaded by _run_stream_method.sh via PARAMS_LIST before the
+# shared optim runner parses the scene list.
+
+params:
+  runtime:
+    cuda_device: 0
+    output_group_by_dataset: 1
+    overwrite: 0
+    dry_run: 0
+
+  input:
+    max_side: 518
+    num_views: 0
+    stride: 1
+    size_multiple: 14
+    depth_scale: 1.0
+    depth_min: 1e-6
+    depth_max: 1e6
+    scene_io_workers: 4
+
+  output:
+    max_pred_points: 800000
+    max_gt_points: 800000
+    max_points_per_view: 500000
+    voxel_downsample: 0.01
+    point_downsample: 1
+    keep_intermediate: 0
+
+  metrics:
+    run_metrics: 1
+    metric_thresholds: 0.5,1.0,2.0,5.0
+    metric_rpe_steps: 1,5,10
+    metric_max_gt_points: 300000
+    metric_max_pred_points_eval: 300000
+    metric_max_gt_points_eval: 300000
+    metric_max_align_points: 100000
+    metric_icp_iterations: 8
+    metric_icp_trim_quantile: 0.7
+    metric_gt_io_workers: 4

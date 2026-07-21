@@ -1,0 +1,20 @@
+defaults:
+  - default
+
+# Number of views parameter for the multi-view datasets
+num_views: 2
+
+# Covisibility threshold for the multi-view datasets
+covisibility_thres_min: 0.3
+covisibility_thres_max: 1.0
+
+# Sampling mode for the A3D dataset
+sampling_mode: "random_walk" 
+
+# Test Resolution
+resolution_test_a3dsynl: ${dataset.resolution_options.518_1_52_ar}
+
+# 32 x 5 = 160
+test_dataset:
+  "+ 160 @ ${dataset.a3dsynl_fa_wai.test.dataset_str}"
+  

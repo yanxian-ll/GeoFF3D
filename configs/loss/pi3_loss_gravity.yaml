@@ -1,0 +1,58 @@
+# Pi3 fine-tuning loss with z-up / gravity-direction supervision.
+# This constrains only the world up direction and leaves arbitrary scene yaw unconstrained.
+# Assumes dataset camera_pose / camera_pose_quats are already in a z-up world frame.
+# Keep convert_predictions_to_view0_frame=True to preserve the original Pi3 geometry-loss alignment.
+
+train_criterion:
+  "ExcludeTopNPercentPixelLoss(
+    FactoredGeometryRegr3DPlusNormalGMLoss(
+      RobustRegressionLoss(alpha=0.5, scaling_c=0.05),
+      norm_mode='avg_dis',
+      depth_type_for_loss='depth_z',
+      loss_in_log=True,
+      flatten_across_image_only=True,
+      compute_pairwise_relative_pose_loss=True,
+      convert_predictions_to_view0_frame=True,
+      compute_world_frame_points_loss=True,
+      apply_normal_and_gm_loss_to_synthetic_data_only=True,
+      normal_loss_weight=3.0,
+      gm_loss_weight=3.0
+    ),
+    top_n_percent=5,
+    apply_to_real_data_only=True,
+    loss_set_indices=[0, 1, 2]
+  ) + GravityAlignmentLoss(
+    gravity_loss_weight=0.1,
+    loss_type='cosine',
+    world_up=(0.0, 0.0, 1.0),
+    only_valid_depth=True,
+    skip_first_view=False,
+    average_across_views=False
+  )"
+
+test_criterion:
+  "ExcludeTopNPercentPixelLoss(
+    FactoredGeometryRegr3DPlusNormalGMLoss(
+      RobustRegressionLoss(alpha=0.5, scaling_c=0.05),
+      norm_mode='avg_dis',
+      depth_type_for_loss='depth_z',
+      loss_in_log=True,
+      flatten_across_image_only=True,
+      compute_pairwise_relative_pose_loss=True,
+      convert_predictions_to_view0_frame=True,
+      compute_world_frame_points_loss=True,
+      apply_normal_and_gm_loss_to_synthetic_data_only=True,
+      normal_loss_weight=3.0,
+      gm_loss_weight=3.0
+    ),
+    top_n_percent=5,
+    apply_to_real_data_only=True,
+    loss_set_indices=[0, 1, 2]
+  ) + GravityAlignmentLoss(
+    gravity_loss_weight=0.1,
+    loss_type='cosine',
+    world_up=(0.0, 0.0, 1.0),
+    only_valid_depth=True,
+    skip_first_view=False,
+    average_across_views=False
+  )"

@@ -1,0 +1,59 @@
+defaults:
+  - default
+
+# Conservative global fine-tuning LR, with higher rates for the newly relevant
+# prior/camera/output heads and a very small DINO encoder LR.
+lr: 1e-05
+min_lr: 5e-08
+warmup_epochs: 2
+raw_translation_loss_warmup_steps: 0
+raw_translation_loss_start_step: 0
+raw_translation_loss_schedule: linear
+epochs: 80
+accum_iter: 24
+keep_freq: 5
+max_num_of_imgs_per_gpu: 12
+
+submodule_configs:
+  model.encoder:
+    lr: 1e-07
+    min_lr: 1e-09
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+  model.world_translation_encoder:
+    lr: 1e-04
+    min_lr: 1e-07
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+  model.world_rotation_encoder:
+    lr: 5e-05
+    min_lr: 5e-08
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+  model.camera_decoder:
+    lr: 5e-05
+    min_lr: 5e-08
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+  model.camera_head:
+    lr: 1e-04
+    min_lr: 1e-07
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+  model.point_decoder:
+    lr: 2e-05
+    min_lr: 2e-08
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+  model.point_head:
+    lr: 2e-05
+    min_lr: 2e-08
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}

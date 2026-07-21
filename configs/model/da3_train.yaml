@@ -1,0 +1,24 @@
+# configs/model/da3_train.yaml
+
+defaults:
+  - default
+  - task: images_only
+
+# String for model factory
+model_str: "da3_train"
+# Model config
+model_config:
+  name: "da3_train"
+  hf_model_name: "checkpoints/da3-large-1.1"
+  # Geometric input config
+  geometric_input_config: ${model.task}
+  # 
+  use_conditioning: true
+  # saddle_balanced, first(train)
+  ref_view_strategy: "first" 
+  gradient_checkpointing: true
+
+# Image Normalization Type
+data_norm_type: "dinov2"
+pretrained: null
+torch_hub_force_reload: false

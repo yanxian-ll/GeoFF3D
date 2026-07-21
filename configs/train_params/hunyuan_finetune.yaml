@@ -1,0 +1,90 @@
+defaults:
+  - default
+
+# Finetuning a pretrained HunyuanWorld-Mirror inside the MapAnything training stack.
+# Keep a conservative global LR, and use smaller LR for the pretrained visual backbone.
+
+lr: 5e-6
+min_lr: 5e-8
+warmup_epochs: 2
+
+# Reuse MapAnything's AdamW / cosine-decay training framework.
+# Submodule names follow the parameter prefixes of:
+#   HunyuanTrainWrapper.model -> WorldMirror
+#   WorldMirror.visual_geometry_transformer / cam_head / pts_head / depth_head / norm_head / gs_head
+submodule_configs:
+  # Full visual backbone: lower LR than heads
+  model.visual_geometry_transformer:
+    lr: 1e-7
+    min_lr: 1e-09
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+
+  # Patch embedding / DINO-style backbone inside the visual transformer: smallest LR
+  model.visual_geometry_transformer.patch_embed:
+    lr: 1e-7
+    min_lr: 1e-09
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+
+  # Conditioning encoders inside visual transformer
+  model.visual_geometry_transformer.pose_embed:
+    lr: 1e-7
+    min_lr: 1e-09
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+
+  model.visual_geometry_transformer.depth_embed:
+    lr: 1e-7
+    min_lr: 1e-09
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+
+  model.visual_geometry_transformer.ray_embed:
+    lr: 1e-7
+    min_lr: 1e-09
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+
+  # Prediction heads
+  model.cam_head:
+    lr: 5e-6
+    min_lr: 5e-8
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+
+  model.pts_head:
+    lr: 5e-6
+    min_lr: 5e-8
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+
+  model.depth_head:
+    lr: 5e-6
+    min_lr: 5e-8
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+
+  model.norm_head:
+    lr: 5e-6
+    min_lr: 5e-8
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+
+  # GS head is only used when enable_gs=true
+  model.gs_head:
+    lr: 5e-6
+    min_lr: 5e-8
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}
+    

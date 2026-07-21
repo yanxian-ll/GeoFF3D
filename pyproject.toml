@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mapanything"
+version = "1.1"
+description = "Universal Feed-Forward Metric 3D Reconstruction"
+readme = "readme.md"
+authors = [{ name = "Nikhil Keetha", email = "keethanikhil@gmail.com" }]
+requires-python = ">=3.10.0"
+dependencies = [
+    "huggingface_hub",
+    "hydra-core",
+    "lpips",
+    "natsort",
+    "opencv-python-headless==4.10.0.84",
+    "OpenEXR",
+    "orjson",
+    "pillow-heif",
+    "plyfile",
+    "python-box",
+    "requests",
+    "rerun-sdk~=0.24.1",
+    "safetensors",
+    "tensorboard",
+    "tqdm",
+    "trimesh",
+    "uniception==0.1.6",
+    "fastapi>=0.110,<1",
+    "pydantic>=2.7,<3",
+    "pydantic-core>=2.27,<3",
+    "starlette>=0.37,<1",
+]
+
+[project.optional-dependencies]
+data = ["pandas"]
+dev = ["pre-commit", "pytest", "pytest-cov", "ruff"]
+gradio = ["gradio==5.47.2", "spaces"]
+radio = ["timm"]
+all = [
+    "mapanything[data]",
+    "mapanything[dev]",
+    "mapanything[gradio]",
+    "mapanything[radio]",
+]
+
+# Setuptools configuration
+[tool.setuptools.packages.find]
+include = ["mapanything*", "slam*"]
+
+[tool.setuptools.package-data]
+"mapanything" = ["**/*"]
+
+[tool.ruff]
+lint.extend-select = ["I"]
+target-version = "py310"
+
+[tool.ruff.lint.isort]
+case-sensitive = false
+combine-as-imports = true
+detect-same-package = false
+order-by-type = false
+known-first-party = ["mapanything", "uniception"]

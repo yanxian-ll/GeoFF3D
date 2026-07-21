@@ -1,0 +1,20 @@
+# String for model factory
+model_str: "ttt3r"
+# Model config
+model_config:
+  name: "ttt3r"
+  # Official checkpoint expected by the TTT3R demo. Override with --model_path
+  # or TTT3R_MODEL_PATH when storing weights elsewhere.
+  checkpoint: "checkpoints/ttt3r/cut3r_512_dpt_4_64.pth"
+  model_path: "checkpoints/ttt3r/cut3r_512_dpt_4_64.pth"
+  device: "cuda"
+  image_size: 512
+  model_update_type: "ttt3r"
+  max_points: 800000
+# Streaming methods do scene-level inference and do not consume normalized
+# MapAnything view tensors.
+data_norm_type: "identity"
+pretrained: null
+torch_hub_force_reload: false
+defaults:
+  - default

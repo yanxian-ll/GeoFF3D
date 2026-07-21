@@ -1,0 +1,32 @@
+dataset_str:
+  "A3DScenesDepthCompletionWAI(
+    split='${dataset.a3dscenes_depth_completion_wai.train.split}',
+    resolution=${dataset.a3dscenes_depth_completion_wai.train.dataset_resolution},
+    principal_point_centered=${dataset.a3dscenes_depth_completion_wai.train.principal_point_centered},
+    seed=${dataset.a3dscenes_depth_completion_wai.train.seed},
+    transform='${dataset.a3dscenes_depth_completion_wai.train.transform}',
+    data_norm_type='${dataset.a3dscenes_depth_completion_wai.train.data_norm_type}',
+    ROOT='${dataset.a3dscenes_depth_completion_wai.train.ROOT}',
+    dataset_metadata_dir='${dataset.a3dscenes_depth_completion_wai.train.dataset_metadata_dir}',
+    overfit_num_sets=${dataset.a3dscenes_depth_completion_wai.train.overfit_num_sets},
+    variable_num_views=${dataset.a3dscenes_depth_completion_wai.train.variable_num_views},
+    num_views=${dataset.a3dscenes_depth_completion_wai.train.num_views},
+    covisibility_thres=${dataset.a3dscenes_depth_completion_wai.train.covisibility_thres},
+    covisibility_thres_max=${dataset.a3dscenes_depth_completion_wai.train.covisibility_thres_max},
+    sampling_mode='${dataset.a3dscenes_depth_completion_wai.train.sampling_mode}',
+    load_modalities=${dataset.a3dscenes_depth_completion_wai.train.load_modalities},)"
+split: 'train'
+dataset_resolution: ${dataset.resolution_train}
+principal_point_centered: ${dataset.principal_point_centered}
+seed: 777
+transform: 'colorjitter+grayscale+gaublur'
+data_norm_type: ${model.data_norm_type}
+ROOT: ${root_data_dir}/a3dscenes
+dataset_metadata_dir: ${mapanything_dataset_metadata_dir}
+overfit_num_sets: null
+variable_num_views: ${dataset.train.variable_num_views}
+num_views: ${dataset.num_views}
+covisibility_thres: 0.1
+covisibility_thres_max: 1.0
+sampling_mode: "random_walk"
+load_modalities: ["image", "depth_da3", "mask"]

@@ -1,0 +1,32 @@
+dataset_str:
+  "A3DScenesWAIInstance(
+    split='${dataset.a3dscenes_instance_wai.val.split}',
+    resolution=${dataset.a3dscenes_instance_wai.val.dataset_resolution},
+    principal_point_centered=${dataset.a3dscenes_instance_wai.val.principal_point_centered},
+    seed=${dataset.a3dscenes_instance_wai.val.seed},
+    transform='${dataset.a3dscenes_instance_wai.val.transform}',
+    data_norm_type='${dataset.a3dscenes_instance_wai.val.data_norm_type}',
+    ROOT='${dataset.a3dscenes_instance_wai.val.ROOT}',
+    dataset_metadata_dir='${dataset.a3dscenes_instance_wai.val.dataset_metadata_dir}',
+    overfit_num_sets=${dataset.a3dscenes_instance_wai.val.overfit_num_sets},
+    variable_num_views=${dataset.a3dscenes_instance_wai.val.variable_num_views},
+    num_views=${dataset.a3dscenes_instance_wai.val.num_views},
+    covisibility_thres=${dataset.a3dscenes_instance_wai.val.covisibility_thres},
+    covisibility_thres_max=${dataset.a3dscenes_instance_wai.val.covisibility_thres_max},
+    sampling_mode='${dataset.a3dscenes_instance_wai.val.sampling_mode}',
+    load_modalities=${dataset.a3dscenes_instance_wai.val.load_modalities},)"
+split: 'val'
+dataset_resolution: ${dataset.resolution_val_a3dscenes}
+principal_point_centered: ${dataset.principal_point_centered}
+seed: 777
+transform: 'imgnorm'
+data_norm_type: ${model.data_norm_type}
+ROOT: ${root_data_dir}/a3dscenes
+dataset_metadata_dir: ${mapanything_dataset_metadata_dir}
+overfit_num_sets: null
+variable_num_views: ${dataset.val.variable_num_views}
+num_views: ${dataset.num_views}
+covisibility_thres: 0.25
+covisibility_thres_max: 1.0
+sampling_mode: "random_walk"
+load_modalities: ["image", "depth", "mask", "instance"]

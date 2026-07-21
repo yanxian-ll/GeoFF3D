@@ -1,0 +1,18 @@
+# String for model factory
+model_str: "stream3r"
+# Model config
+model_config:
+  name: "stream3r"
+  checkpoint: "yslan/STream3R"
+  model_path: "yslan/STream3R"
+  device: "cuda"
+  mode: "causal"
+  streaming: true
+  max_points: 800000
+# Streaming methods do scene-level inference and do not consume normalized
+# MapAnything view tensors.
+data_norm_type: "identity"
+pretrained: null
+torch_hub_force_reload: false
+defaults:
+  - default

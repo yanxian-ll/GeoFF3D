@@ -1,0 +1,33 @@
+defaults:
+  - default
+
+# Number of views parameter for the multi-view datasets
+num_views: 2
+
+# Covisibility threshold for the multi-view datasets
+covisibility_thres_min: 0.3
+covisibility_thres_max: 1.0
+
+# Sampling mode for the A3D dataset
+sampling_mode: "random_walk" 
+
+# Test Resolution
+resolution_test_a3dreal: ${dataset.resolution_options.518_1_52_ar}
+resolution_test_a3dsynl: ${dataset.resolution_options.518_1_52_ar}
+resolution_test_usegeo: ${dataset.resolution_options.518_1_33_ar} 
+resolution_test_urbanscene3d: ${dataset.resolution_options.518_1_33_ar} 
+resolution_test_enrich: ${dataset.resolution_options.518_1_33_ar} 
+
+# Test Set
+# urbanscene3d: Sample 20 multi-view sets from each scene, 6 test scenes in total
+# usegeo: Sample 20 multi-view sets from each scene, 3 test scenes in total
+# a3d-real: Sample 10 multi-view sets from each scene, 27 test scenes in total
+# a3d-syn-fa: Sample 5 multi-view sets from each scene, 32 test scenes in total
+# enrich-aerial: Sample 10 multi-view sets from each scene, 4 test scenes in total
+
+test_dataset:
+  "+ 120  @ ${dataset.urbanscene3d_wai.test.dataset_str}
+  + 60 @ ${dataset.usegeo_wai.test.dataset_str}
+  + 270 @ ${dataset.a3dreal_wai.test.dataset_str}
+  + 160 @ ${dataset.a3dsynl_fa_wai.test.dataset_str}
+  + 40 @ ${dataset.enrich_wai.test.dataset_str}"

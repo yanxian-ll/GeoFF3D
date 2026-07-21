@@ -1,0 +1,7 @@
+camera:
+  enabled: false
+  hidden_dim: null
+
+scale:
+  enabled: true
+  

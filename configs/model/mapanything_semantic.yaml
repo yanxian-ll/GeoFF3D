@@ -1,0 +1,24 @@
+# MapAnything Semantic Model Configuration
+# Extended model with semantic segmentation support
+
+defaults:
+  - default
+  - encoder: dinov2_large
+  - info_sharing: aat_ifr_24_layers
+  - pred_head: dpt_pose_scale
+  - task: semantic
+
+# String for model factory
+model_str: "mapanything_semantic"
+# Model config
+model_config:
+  name: "mapanything_semantic"
+  encoder_config: ${model.encoder}
+  info_sharing_config: ${model.info_sharing}
+  pred_head_config: ${model.pred_head}
+  geometric_input_config: ${model.task}
+  use_register_tokens_from_encoder: True
+  # Semantic specific config
+  semantic_num_classes: ${model.task.num_classes}
+# Image Normalization Type
+data_norm_type: ${model.encoder.data_norm_type}

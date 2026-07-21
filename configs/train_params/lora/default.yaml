@@ -1,0 +1,21 @@
+# Fin3R-style LoRA defaults.
+# Include this file from a train_params config via:
+# defaults:
+#   - default
+#   - lora@lora_defaults: default
+#   - _self_
+#
+# Then use concise per-submodule declarations such as:
+# submodule_configs:
+#   aggregator.patch_embed:
+#     lr: 1e-4
+#     lora:
+#       enabled: true
+
+enabled: false
+r: 8
+alpha: 8
+dropout: 0.1
+target_modules: ["qkv"]
+bias: "none"
+freeze_base_params: true

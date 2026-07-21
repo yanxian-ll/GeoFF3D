@@ -1,0 +1,43 @@
+defaults:
+  - default
+
+# Number of views parameter for the multi-view datasets
+num_views: 4
+
+train:
+  # If True, the number of views can vary from batch to batch. The maximum number of views is num_views and minimum is 2. (On by default for N-view training)
+  variable_num_views: true
+  use_hfov_balanced_sampling: true
+
+# Train Resolution
+resolution_train: ${dataset.resolution_options.518_many_ar}
+
+# Validation Resolution
+resolution_val_blendedmvs: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_a3dreal: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_a3dsynl: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_a3dsyns: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_usegeo: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_urbanscene3d: ${dataset.resolution_options.518_1_33_ar}
+resolution_val_enrich: ${dataset.resolution_options.518_1_33_ar}
+
+
+# Training Set (withour A3D)
+train_dataset:
+  "+ 23_000 @ ${dataset.blendedmvs_wai.train.dataset_str}
+  + 23_000 @ ${dataset.a3dsynl_wai.train.dataset_str}
+  + 23_000 @ ${dataset.a3dsyns_wai.train.dataset_str}
+  + 2_000 @ ${dataset.uavscenes_wai.train.dataset_str}
+  + 1_000 @ ${dataset.whu_whuomvs_wai.train.dataset_str}"
+
+
+# Validation Set
+test_dataset:
+   "+ 500 @ ${dataset.blendedmvs_wai.val.dataset_str}
+   + 500 @ ${dataset.a3dreal_wai.val.dataset_str}
+   + 500 @ ${dataset.a3dsynl_wai.val.dataset_str}
+   + 500 @ ${dataset.a3dsyns_wai.val.dataset_str}
+   + 500 @ ${dataset.usegeo_wai.val.dataset_str}
+   + 100 @ ${dataset.urbanscene3d_wai.val.dataset_str}
+   + 100 @ ${dataset.enrich_wai.val.dataset_str}"
+   

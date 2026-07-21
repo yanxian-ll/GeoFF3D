@@ -1,0 +1,74 @@
+slam:
+  mode: generic_feedforward_slam
+
+input:
+  num_frames: 10
+  image_dir: null
+  priors: null
+  cams_dir: null
+  depth_path: null
+  mask_path: null
+  max_frames: null
+  stride: 1
+  resize: null
+
+frontend:
+  chunk_size: 4
+  overlap: 1
+  min_chunk_size: 2
+
+model:
+  name: dummy
+  coord_type: world
+  scale_type: metric
+
+alignment:
+  mode: auto
+  use_world_translation: true
+  use_world_rotation: false
+  prefer_overlap_points: true
+  refine_world_with_overlap: false
+  min_overlap_points: 100
+  max_overlap_points: 20000
+  allow_se3: true
+  allow_sim3: true
+  allow_sl4: false
+
+backend:
+  type: no_opt
+
+loop_closure:
+  enabled: false
+  verifier: pose_distance
+  distance_threshold: 1.0
+  min_temporal_gap: 20
+  max_candidates_per_query: 1
+  max_translation_error: 1.0
+  max_rotation_angle_deg: 180.0
+  max_rmse: 0.10
+  max_correspondence_distance: 0.10
+  min_inliers: 16
+  min_inlier_ratio: 0.20
+  transform_type: se3
+  max_points: 5000
+  use_open3d: true
+  max_reprojection_error: 3.0
+  min_correspondences: 6
+  ransac_iterations: 128
+  confidence: 0.999
+  pnp_use_opencv: true
+  random_seed: 0
+  noise_sigma: 0.05
+
+mapping:
+  type: pointcloud
+
+export:
+  output_dir: null
+  output_npz: null
+  output_rrd: null
+  max_rrd_points: 800000
+  rrd_seed: 0
+  max_colmap_points: 200000
+  colmap_seed: 0
+  log_images: false

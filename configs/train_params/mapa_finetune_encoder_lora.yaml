@@ -1,0 +1,68 @@
+defaults:
+  - default
+  - lora@lora_defaults: default
+  - _self_
+
+# Use 20x lower lr for finetuning
+lr: 5e-06
+min_lr: 5e-08
+
+# Optimizer parameters specific to submodules
+submodule_configs:
+  # Encoder
+  encoder:
+    lora:
+      enabled: true
+
+  # Ray Directions Encoder
+  ray_dirs_encoder:
+    lora:
+      enabled: true
+  # Depth Encoder
+  depth_encoder:
+    lora:
+      enabled: true
+  # Depth Scale Encoder
+  depth_scale_encoder:
+    lora:
+      enabled: true
+  # Camera Rotation Encoder
+  cam_rot_encoder:
+    lora:
+      enabled: true
+  # Camera Translation Encoder
+  cam_trans_encoder:
+    lora:
+      enabled: true
+  # Camera Translation Distance Encoder
+  cam_trans_dist_encoder:
+    lora:
+      enabled: true
+  # Camera Translation Scale Encoder
+  cam_trans_scale_encoder:
+    lora:
+      enabled: true
+  # Fusion Norm Layer
+  fusion_norm_layer:
+    lora:
+      enabled: true
+  # Scale Token
+  scale_token:
+    lora:
+      enabled: false
+
+  # Multi-View Attention Transformer (Info Sharing)
+  info_sharing:
+    lr: 0
+  
+  # Prediction Heads
+  dense_head:
+    lr: 0
+  
+  #  Pose Head
+  pose_head:
+    lr: 0
+
+  # Scale Head
+  scale_head:
+    lr: 0

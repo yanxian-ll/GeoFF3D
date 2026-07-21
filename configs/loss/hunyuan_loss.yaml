@@ -1,0 +1,16 @@
+train_criterion: |
+  HunyuanFineTuneLoss(
+    enable_cam=True,
+    enable_pts=True,
+    enable_depth=True,
+    enable_norm=True,
+    enable_gs=False,
+  )
+test_criterion: |
+  HunyuanFineTuneLoss(
+    enable_cam=True,
+    enable_pts=True,
+    enable_depth=True,
+    enable_norm=True,
+    enable_gs=False,
+  )
