@@ -1,8 +1,6 @@
 """World-frame variants of factored geometry losses."""
 from __future__ import annotations
 
-import math
-
 import torch
 
 from geoff3d.loss.losses import (
@@ -515,7 +513,6 @@ class WorldFramePoseLoss(Criterion, MultiLoss):
         depth_type_for_loss="depth_z",
         pose_quats_loss_weight=1.0,
         pose_trans_loss_weight=1.0,
-        pose_trans_loss_weight_schedule=None,
         compute_absolute_pose_loss=True,
         compute_pairwise_relative_pose_loss=False,
     ):
@@ -531,9 +528,6 @@ class WorldFramePoseLoss(Criterion, MultiLoss):
         self.depth_type_for_loss = depth_type_for_loss
         self.pose_quats_loss_weight = pose_quats_loss_weight
         self.pose_trans_loss_weight = pose_trans_loss_weight
-        self.pose_trans_loss_weight_schedule = pose_trans_loss_weight_schedule
-        self.current_step = 0
-        self.current_epoch = 0.0
         self.compute_absolute_pose_loss = compute_absolute_pose_loss
         self.compute_pairwise_relative_pose_loss = compute_pairwise_relative_pose_loss
         self.convert_predictions_to_view0_frame = False
@@ -547,38 +541,6 @@ class WorldFramePoseLoss(Criterion, MultiLoss):
 
     def get_name(self):
         return f"WorldFramePoseLoss({self.criterion})"
-
-    def set_schedule_step(self, step, epoch=None):
-        self.current_step = int(step)
-        if epoch is not None:
-            self.current_epoch = float(epoch)
-
-    def _scheduled_pose_trans_loss_weight(self):
-        cfg = self.pose_trans_loss_weight_schedule
-        if not cfg:
-            return float(self.pose_trans_loss_weight)
-
-        start_step = int(cfg.get("start_step", 0))
-        warmup_steps = int(cfg.get("warmup_steps", 0))
-        start_weight = float(cfg.get("start_weight", 0.0))
-        end_weight = float(cfg.get("end_weight", self.pose_trans_loss_weight))
-        schedule = str(cfg.get("schedule", "linear"))
-
-        if warmup_steps <= 0:
-            progress = 1.0
-        else:
-            progress = (self.current_step - start_step) / float(warmup_steps)
-            progress = max(0.0, min(1.0, progress))
-
-        if schedule == "linear":
-            scale = progress
-        elif schedule == "cosine":
-            scale = 0.5 - 0.5 * math.cos(math.pi * progress)
-        elif schedule == "constant":
-            scale = 1.0
-        else:
-            raise ValueError(f"Unknown pose_trans_loss_weight_schedule: {schedule}")
-        return start_weight + (end_weight - start_weight) * scale
 
     def get_all_info(self, batch, preds, dist_clip=None):
         return _get_dataset_world_frame_all_info(self, batch, preds, dist_clip)
@@ -627,10 +589,8 @@ class WorldFramePoseLoss(Criterion, MultiLoss):
         abs_quats_details = []
         rel_trans_details = []
         rel_quats_details = []
-        pose_trans_loss_weight = self._scheduled_pose_trans_loss_weight()
+        pose_trans_loss_weight = self.pose_trans_loss_weight
         details[f"{self_name}_pose_trans_loss_weight"] = float(pose_trans_loss_weight)
-        if self.pose_trans_loss_weight_schedule:
-            details[f"{self_name}_pose_trans_loss_weight_step"] = float(self.current_step)
 
         if self.compute_absolute_pose_loss:
             for view_idx in range(n_views):

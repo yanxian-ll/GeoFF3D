@@ -1,0 +1,20 @@
+# Optional train-only world-frame augmentation. Applies one shared transform
+# to all views in each sample, ordered as:
+#   recenter -> random translation -> random scale -> random xyz-rotation
+# Images, intrinsics, masks, and ray directions are unchanged. Depth and
+# camera-frame distances follow the sampled scale.
+enabled: false
+
+# Random Euler rotation range in degrees [x, y, z]. A scalar applies the same
+# range to all three axes. When null, the split x/y/z values are used.
+rotation_deg: null
+x_rotation_deg: 0.0
+y_rotation_deg: 0.0
+z_rotation_deg: 180.0
+
+translation_range: 10.0
+recenter: true
+recenter_mode: "mean_camera"  # first_camera | mean_camera | scene_points
+
+# Random multiplicative scale sampled uniformly from [min_scale, max_scale].
+scale_range: [0.9, 1.2]

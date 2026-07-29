@@ -1,0 +1,24 @@
+defaults:
+  - default
+
+# VGGT-Omega is a 1B-parameter VGGT-family model. Use a conservative
+# fine-tuning LR by default, following configs/train_params/vggt_finetune.yaml
+# and configs/train_params/pi3_finetune.yaml.
+lr: 1e-05
+min_lr: 1e-07
+
+# VGGT-Omega uses patch_size=16. Keep dataset/inference preprocessing aligned
+# with this because the wrapper only validates H/W and does not resize or pad.
+# Override from CLI if the selected dataset config already controls this.
+size_multiple: 16
+
+# Optimizer parameters specific to submodules.
+submodule_configs:
+  # DINOv2 / VGGT-Omega image patch embedding. Use a much smaller LR for the
+  # low-level visual stem during fine-tuning, matching the existing VGGT config.
+  model.aggregator.patch_embed:
+    lr: 5e-07
+    min_lr: 5e-09
+    warmup_epochs: ${train_params.warmup_epochs}
+    weight_decay: ${train_params.weight_decay}
+    schedule_type: ${train_params.schedule_type}

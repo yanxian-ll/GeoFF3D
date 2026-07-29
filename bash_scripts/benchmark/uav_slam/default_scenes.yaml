@@ -22,6 +22,28 @@
 # Nested blocks below are only for readability; leaf keys are the real names.
 
 datasets:
+  - name: uavff3d_real
+    enabled: true
+    root: /opt/data/private/dataset/data/UAVFF3D-Real
+    scenes:
+      # - nanfang_ndir2
+      # - yanghaitang_ndir2
+      # - xiaoxiang_ndir2
+      - nanfang_part0_ndir
+      # - nanfang_part1_ndir
+      # - xiaoxiang_part0_ndir
+      # - xiaoxiang_part1_ndir
+      # - xiaoxiang_part2_ndir
+      - xiaoxiang_part3_ndir
+      - yanghaitang_part0_ndir
+      # - yanghaitang_part1_ndir
+      - expand1_chunk12
+      - expand1_chunk30
+      - expand2_chunk11
+      - expand2_chunk15
+      - expand3_chunk2
+      - expand3_chunk8
+
   - name: usegeo
     enabled: true
     root: /opt/data/private/dataset/data/usegeo
@@ -57,28 +79,6 @@ datasets:
       - interval5_HKisland01
       - interval5_HKisland02
       # - interval5_HKisland03
-
-  - name: uavff3d_real
-    enabled: true
-    root: /opt/data/private/dataset/data/UAVFF3D-Real
-    scenes:
-      - nanfang_ndir2
-      - yanghaitang_ndir2
-      - xiaoxiang_ndir2
-      - nanfang_part0_ndir
-      # - nanfang_part1_ndir
-      # - xiaoxiang_part0_ndir
-      # - xiaoxiang_part1_ndir
-      # - xiaoxiang_part2_ndir
-      - xiaoxiang_part3_ndir
-      - yanghaitang_part0_ndir
-      # - yanghaitang_part1_ndir
-      - expand1_chunk12
-      - expand1_chunk30
-      - expand2_chunk11
-      - expand2_chunk15
-      - expand3_chunk2
-      - expand3_chunk8
 
   - name: npu_dronemap
     enabled: true

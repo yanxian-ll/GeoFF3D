@@ -12,4 +12,3 @@ root_data_dir: ${machine.root_data_dir}
 geoff3d_dataset_metadata_dir: ${machine.geoff3d_dataset_metadata_dir}
 root_pretrained_checkpoints_dir: ${machine.root_pretrained_checkpoints_dir}
 root_experiments_dir: ${machine.root_experiments_dir}
-root_uniception_pretrained_checkpoints_dir: ${machine.root_uniception_pretrained_checkpoints_dir}

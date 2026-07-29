@@ -87,8 +87,6 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
         translation_degenerate_baseline_eps=1e-6,
         default_world_translation_prob=1.0,
         default_world_rotation_prob=1.0,
-        use_translation_residual_anchor=False,
-        translation_residual_anchor_delta_scale=1.0,
         translation_prior_prob: Optional[float] = None,
         rotation_prior_prob: Optional[float] = None,
         **kwargs,
@@ -233,8 +231,6 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
         self.translation_degenerate_baseline_eps = float(translation_degenerate_baseline_eps)
         self.default_world_translation_prob = float(default_world_translation_prob if translation_prior_prob is None else translation_prior_prob)
         self.default_world_rotation_prob = float(default_world_rotation_prob if rotation_prior_prob is None else rotation_prior_prob)
-        self.use_translation_residual_anchor = bool(use_translation_residual_anchor)
-        self.translation_residual_anchor_delta_scale = float(translation_residual_anchor_delta_scale)
         self.world_translation_encoder = WorldTranslationEncoder(
             3,
             translation_encoder_hidden_dim,
@@ -443,47 +439,6 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
             )
         return outputs
 
-    @staticmethod
-    def _recompute_world_points(camera_poses, local_points):
-        points = torch.einsum(
-            "bnij,bnhwj->bnhwi",
-            camera_poses,
-            homogenize_points(local_points),
-        )[..., :3]
-        return torch.nan_to_num(points, nan=0.0, posinf=1e6, neginf=-1e6)
-
-    def _apply_translation_residual_anchor(self, outputs, norm_t, t_mask):
-        """Use provided translation priors as anchors and camera-head t as residual.
-
-        The anchor is applied in the same normalized coordinate system used by
-        the camera head. Existing de-normalization then maps anchored outputs
-        back to the original input world-translation coordinate frame.
-        """
-        if (
-            not self.use_translation_residual_anchor
-            or norm_t is None
-            or t_mask is None
-            or outputs.get("camera_poses") is None
-            or outputs.get("local_points") is None
-        ):
-            return outputs
-
-        outputs = dict(outputs)
-        camera_poses = outputs["camera_poses"]
-        local_points = outputs["local_points"]
-        mask = t_mask.to(device=camera_poses.device, dtype=torch.bool)
-        if not bool(mask.any()):
-            return outputs
-
-        prior_t = norm_t.to(device=camera_poses.device, dtype=camera_poses.dtype)
-        residual_t = camera_poses[..., :3, 3] * self.translation_residual_anchor_delta_scale
-        anchored_t = prior_t + residual_t
-        out_t = torch.where(mask[..., None], anchored_t, camera_poses[..., :3, 3])
-        camera_poses = GeoFF3D._with_t(camera_poses, out_t[..., None])
-        outputs["camera_poses"] = camera_poses
-        outputs["points"] = self._recompute_world_points(camera_poses, local_points)
-        return outputs
-
     def forward(
         self,
         imgs,
@@ -617,8 +572,6 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
             return_gs_features=return_gs_features,
             gs_feature_tokens=gs_feature_tokens,
         )
-        outputs = self._apply_translation_residual_anchor(outputs, norm_t, t_mask)
-
         # denorm
         if self.use_world_translation_prior and self.de_normalize_outputs and output_norm_center is not None and output_norm_scale is not None:
             outputs = self._denorm(outputs, output_norm_center.to(device, outputs["points"].dtype), output_norm_scale.to(device, outputs["points"].dtype), True)

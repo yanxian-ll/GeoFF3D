@@ -10,7 +10,7 @@ GeoFF3D Datasets
 import torch
 
 from geoff3d.datasets.base.base_dataset import BaseDataset
-from geoff3d.datasets.base.world_frame_augmentation import WorldFrameAugmentDataset  # noqa
+from geoff3d.datasets.base.world_augmentation import WorldFrameAugmentDataset  # noqa
 
 
 _ORIGINAL_BASE_DATASET_INIT = BaseDataset.__init__
@@ -56,39 +56,35 @@ def _base_dataset_init_with_min_num_views(
 
 BaseDataset.__init__ = _base_dataset_init_with_min_num_views
 
-from geoff3d.datasets.wai.blendedmvs import BlendedMVSWAI  # noqa
 from geoff3d.utils.train_tools import get_rank, get_world_size
-
-from geoff3d.datasets.wai.whu_whuomvs import WHUWHUOMVSWAI # noqa
+from geoff3d.datasets.wai.blendedmvs import BlendedMVSWAI  # noqa
 from geoff3d.datasets.wai.uavscenes import UAVScenesWAI # noqa
 from geoff3d.datasets.wai.a3dreal import A3DRealWAI       # noqa
 from geoff3d.datasets.wai.a3dsynl import A3DSynLargeWAI   # noqa
 from geoff3d.datasets.wai.a3dsyns import A3DSynSmallWAI   # noqa
 from geoff3d.datasets.wai.usegeo import UseGeoWAI # noqa
-from geoff3d.datasets.wai.urbanscene3d import UrbanScene3DWAI # noqa
-from geoff3d.datasets.wai.enrich import ENRICHWAI # noqa
 
 
-def _maybe_wrap_world_frame_augmentation(dataset, world_frame_augmentation=None):
+def _maybe_wrap_world_augmentation(dataset, world_augmentation=None):
     """Optionally wrap a train dataset with world-frame augmentation."""
-    if world_frame_augmentation is None:
+    if world_augmentation is None:
         return dataset
 
-    enabled = bool(world_frame_augmentation.get("enabled", False))
+    enabled = bool(world_augmentation.get("enabled", False))
     if not enabled:
         return dataset
 
     return WorldFrameAugmentDataset(
         dataset,
         enabled=enabled,
-        rotation_deg=world_frame_augmentation.get("rotation_deg", None),
-        x_rotation_deg=world_frame_augmentation.get("x_rotation_deg", None),
-        y_rotation_deg=world_frame_augmentation.get("y_rotation_deg", None),
-        z_rotation_deg=world_frame_augmentation.get("z_rotation_deg", 0.0),
-        translation_range=world_frame_augmentation.get("translation_range", 0.0),
-        recenter=world_frame_augmentation.get("recenter", False),
-        recenter_mode=world_frame_augmentation.get("recenter_mode", "first_camera"),
-        scale_range=world_frame_augmentation.get("scale_range", (0.9, 1.1)),
+        rotation_deg=world_augmentation.get("rotation_deg", None),
+        x_rotation_deg=world_augmentation.get("x_rotation_deg", None),
+        y_rotation_deg=world_augmentation.get("y_rotation_deg", None),
+        z_rotation_deg=world_augmentation.get("z_rotation_deg", 0.0),
+        translation_range=world_augmentation.get("translation_range", 0.0),
+        recenter=world_augmentation.get("recenter", False),
+        recenter_mode=world_augmentation.get("recenter_mode", "first_camera"),
+        scale_range=world_augmentation.get("scale_range", (0.9, 1.1)),
     )
 
 
@@ -209,14 +205,14 @@ def get_train_data_loader(
     shuffle=True,
     drop_last=True,
     pin_mem=True,
-    world_frame_augmentation=None,
+    world_augmentation=None,
 ):
     "Dynamic PyTorch dataloader corresponding to the training dataset"
     # PyTorch dataset
     if isinstance(dataset, str):
         dataset = eval(dataset)
 
-    dataset = _maybe_wrap_world_frame_augmentation(dataset, world_frame_augmentation)
+    dataset = _maybe_wrap_world_augmentation(dataset, world_augmentation)
 
     world_size = get_world_size()
     rank = get_rank()

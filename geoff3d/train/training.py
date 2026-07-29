@@ -43,10 +43,10 @@ if hasattr(torch.backends.cuda, "matmul") and hasattr(
     torch.backends.cuda.matmul.allow_tf32 = True
 
 
-def _get_world_frame_augmentation_cfg(args):
-    if not hasattr(args.dataset, "world_frame_augmentation"):
+def _get_world_augmentation_cfg(args):
+    if not hasattr(args.dataset, "world_augmentation"):
         return None
-    cfg = args.dataset.world_frame_augmentation
+    cfg = args.dataset.world_augmentation
     if cfg is None:
         return None
     return OmegaConf.to_container(cfg, resolve=True)
@@ -106,7 +106,7 @@ def train(args):
         num_workers=args.dataset.num_workers,
         test=False,
         max_num_of_imgs_per_gpu=args.train_params.max_num_of_imgs_per_gpu,
-        world_frame_augmentation=_get_world_frame_augmentation_cfg(args),
+        world_augmentation=_get_world_augmentation_cfg(args),
     )
     print("Building test dataset {:s}".format(args.dataset.test_dataset))
     # test_batch_size = 2 * (
@@ -374,7 +374,7 @@ def build_dataset(
     test,
     batch_size=None,
     max_num_of_imgs_per_gpu=None,
-    world_frame_augmentation=None,
+    world_augmentation=None,
 ):
     """
     Builds data loaders for training or testing.
@@ -385,7 +385,7 @@ def build_dataset(
         test: Boolean flag indicating whether this is a test dataset.
         batch_size: Number of samples per batch. Defaults to None. Used only for testing.
         max_num_of_imgs_per_gpu: Maximum number of images per GPU. Defaults to None. Used only for training.
-        world_frame_augmentation: Optional train-only world-frame augmentation config.
+        world_augmentation: Optional train-only world-frame augmentation config.
 
     Returns:
         DataLoader: PyTorch DataLoader configured for the specified dataset.
@@ -415,7 +415,7 @@ def build_dataset(
             pin_mem=True,
             shuffle=True,
             drop_last=True,
-            world_frame_augmentation=world_frame_augmentation,
+            world_augmentation=world_augmentation,
         )
 
     print(f"{split} dataset length: ", len(loader))

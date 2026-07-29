@@ -3,8 +3,8 @@ set -euo pipefail
 
 METHOD_NAME="geoff3d"
 MODEL="geoff3d"
-# CHECKPOINT="${CHECKPOINT:-experiments/dom/uav_training/geoff3d_stage1/checkpoint-last.pth}"
-CHECKPOINT="${CHECKPOINT:-experiments/dom/uav_training/geoff3d_stage2/checkpoint-best.pth}"
+# CHECKPOINT="${CHECKPOINT:-experiments/uav_training/geoff3d_stage1_geoff3d_12v_4d_12ipg_2g/checkpoint-last.pth}"
+CHECKPOINT="${CHECKPOINT:-experiments/uav_training/geoff3d_8v_4d_8ipg_2g/checkpoint-best.pth}"
 
 
 
@@ -26,7 +26,7 @@ DEPTH_PRIOR="${DEPTH_PRIOR:-pred}"
 
 POSE_PRIOR="none"
 
-MAX_CHUNK_SIZE="${MAX_CHUNK_SIZE:-50}"
+MAX_CHUNK_SIZE="${MAX_CHUNK_SIZE:-30}"
 MIN_CHUNK_SIZE="${MIN_CHUNK_SIZE:-8}"
 
 # Optional hierarchical post-alignment across chunks.

@@ -1,14 +1,12 @@
 defaults:
   - resolution_options: default
+  - world_augmentation: default
   - blendedmvs_wai: default
-  - whu_whuomvs_wai: default
   - uavscenes_wai: default
   - a3dreal_wai: default
   - a3dsynl_wai: default
   - a3dsyns_wai: default
   - usegeo_wai: default
-  - urbanscene3d_wai: default
-  - enrich_wai: default
 
 # Training Set, For example: BlendedMVS(split='train', resolution=(512, 384), transform=...)
 train_dataset: ???
@@ -27,26 +25,6 @@ num_views: 2
 min_num_views: 2
 # Use a centered principal point for all images
 principal_point_centered: false
-# Optional train-only world-frame augmentation. Applies one shared transform
-# to all views in each sample, ordered as:
-#   recenter -> random translation -> random scale -> random xyz-rotation
-# Images, intrinsics, masks, and ray directions are unchanged. Depth and
-# camera-frame distances follow the sampled scale.
-world_frame_augmentation:
-  enabled: false
-  # New preferred config: random Euler rotation range in degrees [x, y, z].
-  # A scalar applies the same range to all three axes.
-  # When null, x/y default to 0 and z uses z_rotation_deg for backward compatibility.
-  rotation_deg: null
-  x_rotation_deg: 180.0
-  y_rotation_deg: 180.0
-  z_rotation_deg: 180.0
-  translation_range: 20.0
-  recenter: true
-  recenter_mode: "mean_camera"  # first_camera | mean_camera | scene_points
-  # Random multiplicative scale sampled uniformly from [min_scale, max_scale].
-  # Scalar means fixed scale. Example: [0.9, 1.1] jitters geometry by ±10%.
-  scale_range: [0.5, 1.5]
 # Default config for multi-view datasets
 train:
   # If True, the number of views can vary from batch to batch. The maximum number of views is num_views and minimum is min_num_views.

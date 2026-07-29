@@ -1,0 +1,21 @@
+defaults:
+  - default
+
+# Stage 1 prior probabilities for GeoFF3D training.
+# All priors are fused as encoder-token biases before the decoder.
+overall_prob: 1.0
+
+# Dense priors.
+ray_dirs_prob: 0.5
+depth_prob: 0.5
+sparse_depth_prob: 0.5
+sparsification_removal_percent: 0.9
+
+# World-frame global priors.
+world_translation_prob: 1.0
+world_rotation_prob: 0.5
+
+# Deprecated compatibility field. It is intentionally ignored by
+# GeoFF3D because the original Pi3X relative pose-injection path
+# has been removed.
+cam_prob: 0.0

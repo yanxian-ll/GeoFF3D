@@ -14,12 +14,6 @@ min_lr: 1e-06
 # Epochs to warmup LR
 warmup_epochs: 10
 
-# Optional loss-level scheduling. Used by losses that explicitly reference these
-# fields, for example raw world-translation supervision warmup.
-raw_translation_loss_warmup_steps: 1000000
-raw_translation_loss_start_step: 50000
-raw_translation_loss_schedule: linear
-
 # Weight decay
 weight_decay: 0.05
 # LR schedule type

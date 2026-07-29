@@ -170,6 +170,9 @@ def get_transformed_cached_point_maps(
 def get_transformed_cameras(
     record: Mapping[str, object],
 ) -> List[Dict[str, object]]:
+    refined = record.get("ba_refined_cameras", None)
+    if isinstance(refined, AbcSequence):
+        return [dict(cam) for cam in refined]  # type: ignore[arg-type]
     cams = record.get("pred_cams", [])
     if not isinstance(cams, AbcSequence):
         return []

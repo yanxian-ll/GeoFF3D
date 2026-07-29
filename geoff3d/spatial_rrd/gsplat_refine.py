@@ -158,6 +158,13 @@ def _resize_rgb_to_hw(rgb: np.ndarray, h: int, w: int) -> np.ndarray:
     return rgb
 
 
+def _rgb_to_float01(rgb: np.ndarray) -> np.ndarray:
+    rgb = np.asarray(rgb, dtype=np.float32)
+    if rgb.size and float(np.nanmax(rgb)) > 1.0:
+        rgb = rgb / 255.0
+    return np.clip(rgb, 0.0, 1.0)
+
+
 def _sample_gaussians_from_pointmaps(
     pred_maps: Sequence[np.ndarray],
     pred_valid_masks: Sequence[np.ndarray],
@@ -187,7 +194,7 @@ def _sample_gaussians_from_pointmaps(
 
         ys, xs = np.nonzero(valid)
         pts = pmap[ys, xs].reshape(-1, 3).astype(np.float32)
-        cols = rgb[ys, xs].reshape(-1, 3).astype(np.float32) / 255.0
+        cols = _rgb_to_float01(rgb[ys, xs].reshape(-1, 3))
 
         points_all.append(pts)
         colors_all.append(cols)
@@ -286,7 +293,7 @@ def _prepare_view_tensors(
         rgb = _resize_rgb_to_hw(rgb, h0, w0)
         if (h, w) != (h0, w0):
             rgb = cv2.resize(rgb, (w, h), interpolation=cv2.INTER_AREA)
-        rgb_f = rgb.astype(np.float32) / 255.0
+        rgb_f = _rgb_to_float01(rgb)
 
         c2w_list.append(T.astype(np.float32))
         K_list.append(K.astype(np.float32))
@@ -1143,16 +1150,13 @@ def _estimate_log_scales_from_points(
     points: torch.Tensor,
     *,
     init_scale: float,
-    max_exact_knn_points: int = 200000,
-    sample_points: int = 50000,
+    sample_points: int = 4096,
 ) -> torch.Tensor:
     """Official-style KNN scale initialization.
 
-    Official gsplat trainer initializes Gaussian size from the average distance
-    of 3 nearest neighbors. Dense UAV pointmaps may contain millions of points,
-    so exact cdist is only used below max_exact_knn_points. For larger sets,
-    estimate a global median neighbor distance from a random subset and apply
-    it to all points.
+    Estimate the official nearest-neighbor initialization scale on a bounded
+    random subset. Never materialize an O(N^2) distance matrix for all UAV
+    points; the old 50k/200k thresholds could require tens of GB of memory.
     """
     points = points.float()
     n = int(points.shape[0])
@@ -1162,20 +1166,6 @@ def _estimate_log_scales_from_points(
         return torch.full((n, 3), math.log(1e-4), device=device, dtype=torch.float32)
 
     with torch.no_grad():
-        if n <= int(max_exact_knn_points):
-            dist = torch.cdist(points, points)
-            dist.fill_diagonal_(float("inf"))
-            k = min(4, n - 1)
-            knn_dist = torch.topk(dist, k=k, dim=1, largest=False).values
-            if k > 1:
-                dist_avg = knn_dist[:, : min(3, k)].mean(dim=-1)
-            else:
-                dist_avg = knn_dist[:, 0]
-            dist_avg = dist_avg.clamp_min(1e-8)
-            scales = torch.log(dist_avg * float(init_scale)).unsqueeze(-1).repeat(1, 3)
-            return scales.float()
-
-        # Large point cloud fallback: estimate one robust scale from subset.
         m = min(int(sample_points), n)
         perm = torch.randperm(n, device=device)[:m]
         pts = points[perm]
@@ -1336,7 +1326,7 @@ def _rasterize_splats_official_style(
     from gsplat.rendering import rasterization  # type: ignore[import-untyped]
 
     means = splats["means"]
-    quats = splats["quats"]
+    quats = torch.nn.functional.normalize(splats["quats"], dim=-1)
     scales = torch.exp(splats["scales"])
     opacities = torch.sigmoid(splats["opacities"])
     colors = torch.cat([splats["sh0"], splats["shN"]], dim=1)
@@ -2099,7 +2089,9 @@ def optimize_and_save_gsplat_bundle(
         means_local_np = splats["means"].detach().cpu().numpy().astype(np.float32)
         log_scales_local_np = splats["scales"].detach().cpu().numpy().astype(np.float32)
         opacity_logits_np = splats["opacities"].detach().cpu().numpy().astype(np.float32)
-        quats_np = splats["quats"].detach().cpu().numpy().astype(np.float32)
+        quats_np = torch.nn.functional.normalize(
+            splats["quats"], dim=-1
+        ).detach().cpu().numpy().astype(np.float32)
 
         sh0_t = splats["sh0"].detach()
         colors_np_final = _sh0_to_rgb(sh0_t[:, 0, :]).cpu().numpy().astype(np.float32)

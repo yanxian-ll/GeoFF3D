@@ -135,8 +135,11 @@ def init_model_from_config(
 
 # Define model configurations with import paths
 MODEL_CONFIGS = {
-    # GeoFF3D depends on the vendored Pi3/Pi3X implementation. VGGT and Pi3X
-    # are retained as inference baselines.
+    # GeoFF3D and trainable external baselines.
+    "pi3": {
+        "module": "geoff3d.models.external.pi3",
+        "class_name": "Pi3Wrapper",
+    },
     "pi3x": {
         "module": "geoff3d.models.external.pi3x",
         "class_name": "Pi3XWrapper",
@@ -148,6 +151,10 @@ MODEL_CONFIGS = {
     "vggt": {
         "module": "geoff3d.models.external.vggt",
         "class_name": "VGGTWrapper",
+    },
+    "vggt_omega": {
+        "module": "geoff3d.models.external.vggt_omega",
+        "class_name": "VGGTOmegaWrapper",
     },
 }
 

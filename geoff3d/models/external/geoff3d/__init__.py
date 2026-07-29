@@ -149,8 +149,6 @@ class GeoFF3DWrapper(torch.nn.Module):
         translation_degenerate_baseline_eps: float = 1e-6,
         translation_prior_prob: float = 1.0,
         rotation_prior_prob: float = 1.0,
-        use_translation_residual_anchor: bool = False,
-        translation_residual_anchor_delta_scale: float = 1.0,
         **kwargs,
     ):
         super().__init__()
@@ -166,9 +164,6 @@ class GeoFF3DWrapper(torch.nn.Module):
         self.default_translation_prior_prob = float(translation_prior_prob)
         self.default_rotation_prior_prob = float(rotation_prior_prob)
         self.translation_normalization = translation_normalization
-        self.translation_residual_anchor_delta_scale = float(
-            translation_residual_anchor_delta_scale
-        )
         self.world_translation_prior_jitter = self._parse_world_translation_prior_jitter(
             world_translation_prior_jitter
         )
@@ -193,8 +188,6 @@ class GeoFF3DWrapper(torch.nn.Module):
             translation_degenerate_baseline_eps=translation_degenerate_baseline_eps,
             default_world_translation_prob=translation_prior_prob,
             default_world_rotation_prob=rotation_prior_prob,
-            use_translation_residual_anchor=use_translation_residual_anchor,
-            translation_residual_anchor_delta_scale=translation_residual_anchor_delta_scale,
         )
 
         if load_pretrained_weights:
@@ -221,9 +214,6 @@ class GeoFF3DWrapper(torch.nn.Module):
             "std_z": float(_cfg_get(cfg, "std_z", 0.10)),
             "bias_std_xy": float(_cfg_get(cfg, "bias_std_xy", 0.02)),
             "bias_std_z": float(_cfg_get(cfg, "bias_std_z", 0.05)),
-            "scale_by_residual_anchor_delta": bool(
-                _cfg_get(cfg, "scale_by_residual_anchor_delta", True)
-            ),
         }
         if not 0.0 <= parsed["apply_prob"] <= 1.0:
             raise ValueError("world_translation_prior_jitter.apply_prob must be in [0, 1]")
@@ -305,13 +295,8 @@ class GeoFF3DWrapper(torch.nn.Module):
         ).view(1, 1, 3)
         view_delta = torch.randn(batch_size, num_views, 3, device=device, dtype=work_dtype) * view_std
         scene_delta = torch.randn(batch_size, 1, 3, device=device, dtype=work_dtype) * bias_std
-        residual_scale = (
-            abs(self.translation_residual_anchor_delta_scale)
-            if cfg["scale_by_residual_anchor_delta"]
-            else 1.0
-        )
         jitter_scale = self._translation_jitter_scale(translations_f)
-        delta = (view_delta + scene_delta) * jitter_scale * residual_scale
+        delta = (view_delta + scene_delta) * jitter_scale
         return translations + (delta * apply_mask).to(dtype=translations.dtype)
 
     def forward(self, views: List[Dict]):

@@ -85,6 +85,38 @@ bash bash_scripts/benchmark/uav_slam/ours/geoff3d_gnss_perturb.sh \
 
 The scene-list format is documented in `bash_scripts/benchmark/uav_slam/default_scenes.yaml`. Generated results are written below `outputs/` and are ignored by Git.
 
+To additionally export an Open3D TSDF mesh from the predicted core-view RGB-D
+maps, enable it for any retained inference script:
+
+Install the mesh dependency once with `pip install -e ".[mesh]"`.
+
+```bash
+EXPORT_TSDF_MESH=1 \
+TSDF_VOXEL_SIZE=0.05 \
+TSDF_DEPTH_TRUNC=1000 \
+CHECKPOINT=/path/to/checkpoint-best.pth \
+bash bash_scripts/benchmark/uav_slam/ours/geoff3d.sh \
+  --cuda-device 0 --scene-list /path/to/scenes.yaml
+```
+
+The raw and connected-component-filtered meshes are saved as
+`mesh/tsdf_mesh.ply` and `mesh/tsdf_mesh_post.ply` inside each scene result.
+
+Bundle adjustment is optional and disabled by default. It builds SIFT tracks
+between nearby frames and refines the predicted cameras with pycolmap:
+
+```bash
+pip install -e ".[ba]"
+BUNDLE_ADJUSTMENT=1 CHECKPOINT=/path/to/checkpoint-best.pth \
+bash bash_scripts/benchmark/uav_slam/ours/geoff3d.sh \
+  --cuda-device 0 --scene-list /path/to/scenes.yaml
+```
+
+The refined COLMAP reconstruction is written to `bundle_adjustment/sparse/`.
+The optional gsplat stage now exposes only the main controls:
+`GSPLAT_STEPS`, `GSPLAT_MAX_GAUSSIANS`, `GSPLAT_RENDER_SCALE`, and
+`GSPLAT_BUNDLE_IMAGES`.
+
 ## Repository layout
 
 ```text

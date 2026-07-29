@@ -55,6 +55,28 @@ def iter_progress(
     return values
 
 
+def intrinsics_from_views(
+    views: Sequence[Dict[str, object]],
+) -> List[Optional[np.ndarray]]:
+    """Extract valid per-view 3x3 camera intrinsics."""
+    intrinsics: List[Optional[np.ndarray]] = []
+    for view in views:
+        value = view.get("camera_intrinsics")
+        if value is None:
+            intrinsics.append(None)
+            continue
+        if torch.is_tensor(value):
+            value = value.detach().float().cpu().numpy()
+        matrix = np.asarray(value, dtype=np.float32)
+        if matrix.ndim == 3:
+            matrix = matrix[0]
+        if matrix.shape == (3, 3) and np.isfinite(matrix).all():
+            intrinsics.append(matrix)
+        else:
+            intrinsics.append(None)
+    return intrinsics
+
+
 # ---------------------------------------------------------------------------
 # File collection / camera parsing
 # ---------------------------------------------------------------------------

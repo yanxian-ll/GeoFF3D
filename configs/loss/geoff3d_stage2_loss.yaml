@@ -47,13 +47,6 @@ train_criterion: |
     norm_mode='avg_dis',
     depth_type_for_loss='depth_z',
     pose_trans_loss_weight=2.0,
-    pose_trans_loss_weight_schedule={
-      'start_weight': 0.0,
-      'end_weight': 2.0,
-      'warmup_steps': args.train_params.raw_translation_loss_warmup_steps,
-      'start_step': args.train_params.raw_translation_loss_start_step,
-      'schedule': args.train_params.raw_translation_loss_schedule
-    },
     pose_quats_loss_weight=1.0,
     compute_absolute_pose_loss=True,
     compute_pairwise_relative_pose_loss=True
@@ -106,13 +99,6 @@ test_criterion: |
     norm_mode='avg_dis',
     depth_type_for_loss='depth_z',
     pose_trans_loss_weight=2.0,
-    pose_trans_loss_weight_schedule={
-      'start_weight': 0.0,
-      'end_weight': 2.0,
-      'warmup_steps': args.train_params.raw_translation_loss_warmup_steps,
-      'start_step': args.train_params.raw_translation_loss_start_step,
-      'schedule': args.train_params.raw_translation_loss_schedule
-    },
     pose_quats_loss_weight=1.0,
     compute_absolute_pose_loss=True,
     compute_pairwise_relative_pose_loss=True

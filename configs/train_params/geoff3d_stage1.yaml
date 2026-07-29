@@ -6,9 +6,6 @@ defaults:
 lr: 1e-05
 min_lr: 5e-08
 warmup_epochs: 2
-raw_translation_loss_warmup_steps: 0
-raw_translation_loss_start_step: 0
-raw_translation_loss_schedule: linear
 epochs: 80
 accum_iter: 24
 keep_freq: 5

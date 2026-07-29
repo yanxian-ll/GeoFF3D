@@ -288,6 +288,29 @@ PY
     require_result_file "$result_dir/gsplat/summary.json"
   fi
 
+  if is_on "$(param EXPORT_TSDF_MESH)"; then
+    local mesh_dir
+    mesh_dir="$(param TSDF_OUTPUT_DIR)"
+    if [[ -z "$mesh_dir" ]]; then
+      mesh_dir="$result_dir/mesh"
+    fi
+    require_result_file "$mesh_dir/tsdf_mesh.ply"
+    require_result_file "$mesh_dir/tsdf_mesh_post.ply"
+    require_result_file "$mesh_dir/summary.json"
+  fi
+
+  if is_on "$(param BUNDLE_ADJUSTMENT)"; then
+    local ba_dir
+    ba_dir="$(param BA_OUTPUT_DIR)"
+    if [[ -z "$ba_dir" ]]; then
+      ba_dir="$result_dir/bundle_adjustment"
+    fi
+    require_result_file "$ba_dir/summary.json"
+    require_result_file "$ba_dir/sparse/cameras.bin"
+    require_result_file "$ba_dir/sparse/images.bin"
+    require_result_file "$ba_dir/sparse/points3D.bin"
+  fi
+
   # Optional DOM result.
   # _run_spatial_method.sh currently writes DOM to output_rrd.with_suffix("")/orthodom.
   if is_on "$(param RENDER_DOM)"; then
@@ -845,12 +868,6 @@ while IFS= read -r scene_entry_b64; do
     CMD+=(--keep_chunk_cache)
   fi
 
-  if is_on "$(param MV_CONSISTENCY)"; then
-    CMD+=(--mv_consistency)
-    cmd_arg MV_MIN_SUPPORT --mv_min_support
-    cmd_arg MV_CONF_THRESHOLD --mv_conf_threshold
-  fi
-
   if is_on "$(param POST_CHUNK_ALIGN)"; then
     CMD+=(--post_chunk_align)
     cmd_arg POST_CHUNK_ALIGN_MODE --post_chunk_align_mode
@@ -873,6 +890,30 @@ while IFS= read -r scene_entry_b64; do
   if is_on "$(param COMPUTE_SEAM_ERROR)"; then
     CMD+=(--compute_seam_error)
     cmd_arg SEAM_ERROR_MAX_POINTS_PER_EDGE --seam_error_max_points_per_edge
+  fi
+
+  if is_on "$(param EXPORT_TSDF_MESH)"; then
+    CMD+=(--export_tsdf_mesh)
+    cmd_arg TSDF_OUTPUT_DIR --tsdf_output_dir
+    cmd_arg TSDF_VOXEL_SIZE --tsdf_voxel_size
+    cmd_arg TSDF_SDF_TRUNC --tsdf_sdf_trunc
+    cmd_arg TSDF_DEPTH_TRUNC --tsdf_depth_trunc
+    cmd_arg TSDF_MIN_DEPTH --tsdf_min_depth
+    cmd_arg TSDF_PIXEL_STRIDE --tsdf_pixel_stride
+    cmd_arg TSDF_KEEP_CLUSTERS --tsdf_keep_clusters
+    cmd_arg TSDF_MIN_TRIANGLES --tsdf_min_triangles
+  fi
+
+  if is_on "$(param BUNDLE_ADJUSTMENT)"; then
+    CMD+=(--bundle_adjustment)
+    cmd_arg BA_OUTPUT_DIR --ba_output_dir
+    cmd_arg BA_MAX_KEYPOINTS --ba_max_keypoints
+    cmd_arg BA_PAIR_WINDOW --ba_pair_window
+    cmd_arg BA_RATIO_TEST --ba_ratio_test
+    cmd_arg BA_MAX_REPROJ_ERROR --ba_max_reproj_error
+    if is_on "$(param BA_REFINE_INTRINSICS)"; then
+      CMD+=(--ba_refine_intrinsics)
+    fi
   fi
 
   if is_on "$(param RENDER_DOM)"; then
@@ -911,67 +952,10 @@ while IFS= read -r scene_entry_b64; do
     CMD+=(--gsplat_refine)
     cmd_arg GSPLAT_STEPS --gsplat_steps
     cmd_arg GSPLAT_MAX_GAUSSIANS --gsplat_max_gaussians
-    cmd_arg GSPLAT_BATCH_VIEWS --gsplat_batch_views
     cmd_arg GSPLAT_RENDER_SCALE --gsplat_render_scale
-    cmd_arg GSPLAT_SINGLE_MAX_IMAGES --gsplat_single_max_images
-    cmd_arg GSPLAT_MAX_IMAGES_PER_BUNDLE --gsplat_max_images_per_bundle
-    cmd_arg GSPLAT_MIN_CORE_IMAGES_PER_BUNDLE --gsplat_min_core_images_per_bundle
-    if ! is_on "$(param GSPLAT_OPTIMIZE_POSE)"; then
-      CMD+=(--gsplat_no_pose_opt)
-    fi
+    cmd_arg GSPLAT_BUNDLE_IMAGES --gsplat_bundle_images
     if is_on "$(param GSPLAT_SAVE_RENDERED_VIEWS)"; then
       CMD+=(--gsplat_save_rendered_views)
-      cmd_arg GSPLAT_RENDER_OUTPUT_MAX_VIEWS --gsplat_render_output_max_views
-      cmd_arg GSPLAT_RENDER_OUTPUT_STRIDE --gsplat_render_output_stride
-    fi
-
-    cmd_arg GSPLAT_STRATEGY --gsplat_strategy
-    cmd_arg GSPLAT_SH_DEGREE --gsplat_sh_degree
-    cmd_arg GSPLAT_SH_DEGREE_INTERVAL --gsplat_sh_degree_interval
-    cmd_arg GSPLAT_INIT_OPACITY --gsplat_init_opacity
-    cmd_arg GSPLAT_INIT_SCALE --gsplat_init_scale
-    cmd_arg GSPLAT_SSIM_LAMBDA --gsplat_ssim_lambda
-    cmd_arg GSPLAT_MEANS_LR --gsplat_means_lr
-    cmd_arg GSPLAT_SCALES_LR --gsplat_scales_lr
-    cmd_arg GSPLAT_OPACITIES_LR --gsplat_opacities_lr
-    cmd_arg GSPLAT_QUATS_LR --gsplat_quats_lr
-    cmd_arg GSPLAT_SH0_LR --gsplat_sh0_lr
-    cmd_arg GSPLAT_SHN_LR --gsplat_shN_lr
-    cmd_arg GSPLAT_POSE_LR --gsplat_pose_lr
-    cmd_arg GSPLAT_POSE_REG --gsplat_pose_reg
-    cmd_arg GSPLAT_OPACITY_REG --gsplat_opacity_reg
-    cmd_arg GSPLAT_SCALE_REG --gsplat_scale_reg
-    cmd_arg GSPLAT_REFINE_START_ITER --gsplat_refine_start_iter
-    cmd_arg GSPLAT_REFINE_STOP_ITER --gsplat_refine_stop_iter
-    cmd_arg GSPLAT_REFINE_EVERY --gsplat_refine_every
-    cmd_arg GSPLAT_RESET_EVERY --gsplat_reset_every
-    cmd_arg GSPLAT_PRUNE_OPA --gsplat_prune_opa
-    cmd_arg GSPLAT_GROW_GRAD2D --gsplat_grow_grad2d
-    cmd_arg GSPLAT_GROW_SCALE3D --gsplat_grow_scale3d
-    cmd_arg GSPLAT_GROW_SCALE2D --gsplat_grow_scale2d
-    cmd_arg GSPLAT_PRUNE_SCALE3D --gsplat_prune_scale3d
-    cmd_arg GSPLAT_PRUNE_SCALE2D --gsplat_prune_scale2d
-
-    if is_on "$(param GSPLAT_ABSGRAD)"; then
-      CMD+=(--gsplat_absgrad)
-    fi
-    if is_on "$(param GSPLAT_STRATEGY_QUIET)"; then
-      CMD+=(--gsplat_strategy_quiet)
-    fi
-    if is_on "$(param GSPLAT_PACKED)"; then
-      CMD+=(--gsplat_packed)
-    fi
-    if is_on "$(param GSPLAT_SPARSE_GRAD)"; then
-      CMD+=(--gsplat_sparse_grad)
-    fi
-    if is_on "$(param GSPLAT_VISIBLE_ADAM)"; then
-      CMD+=(--gsplat_visible_adam)
-    fi
-    if is_on "$(param GSPLAT_ANTIALIASED)"; then
-      CMD+=(--gsplat_antialiased)
-    fi
-    if is_on "$(param GSPLAT_RANDOM_BKGD)"; then
-      CMD+=(--gsplat_random_bkgd)
     fi
   fi
 

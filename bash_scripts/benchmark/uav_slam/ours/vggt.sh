@@ -3,7 +3,7 @@ set -euo pipefail
 
 METHOD_NAME="vggt_ft"
 MODEL="vggt"
-CHECKPOINT="${CHECKPOINT:-experiments/dom/uav_training/vggt_finetuning_16v_6d_16ipg_2g/checkpoint-best.pth}"
+CHECKPOINT="${CHECKPOINT:-experiments/uav_training/vggt_finetuning_8v_4d_8ipg_2g/checkpoint-best.pth}"
 
 # The fine-tuned checkpoint is complete, so do not load the base VGGT weights
 # before applying it.
@@ -23,7 +23,7 @@ ROTATION_PRIOR="none"
 RAY_PRIOR="none"
 DEPTH_PRIOR="none"
 
-MAX_CHUNK_SIZE="${MAX_CHUNK_SIZE:-50}"
+MAX_CHUNK_SIZE="${MAX_CHUNK_SIZE:-30}"
 MIN_CHUNK_SIZE="${MIN_CHUNK_SIZE:-8}"
 
 POST_CHUNK_ALIGN="${POST_CHUNK_ALIGN:-1}"

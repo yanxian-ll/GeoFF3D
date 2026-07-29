@@ -1,0 +1,18 @@
+# String for model factory
+model_str: "pi3"
+# Model config
+model_config:
+  name: "pi3"
+  # Load pre-trained weights
+  load_pretrained_weights: true
+  # PI3 model name or path
+  # pretrained_model_name_or_path: "yyfz233/Pi3"
+  pretrained_model_name_or_path: "checkpoints/pi3"
+  # Whether to use gradient checkpointing in Pi3
+  gradient_checkpointing: true
+# Image Normalization Type
+data_norm_type: "identity"
+# Pi3 checkpoint is already loaded in the inference wrapper
+pretrained: null
+# Torch hub force reload
+torch_hub_force_reload: False

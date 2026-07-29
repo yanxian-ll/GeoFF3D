@@ -25,7 +25,7 @@ params:
     footprint_workers: 4
 
   chunking:
-    max_chunk_size: 50
+    max_chunk_size: 30
     min_chunk_size: 8
     chunk_order: spatial_center_bfs
     chunk_cache_workers: 2
@@ -67,11 +67,6 @@ params:
     pose_perturb_yaw_max_deg: 0.0
     pose_perturb_seed_offset: 930001
 
-  multiview_filter:
-    mv_consistency: 0
-    mv_min_support: 1
-    mv_conf_threshold: 0.0
-
   post_align:
     post_chunk_align: 1
     post_chunk_align_mode: rigid
@@ -86,6 +81,24 @@ params:
     post_chunk_align_nn_fallback: 0
     post_chunk_align_nn_points: 20000
     post_chunk_align_nn_quantile: 0.7
+
+  tsdf_mesh:
+    export_tsdf_mesh: 1
+    tsdf_voxel_size: 0.5
+    tsdf_sdf_trunc: -1.0
+    tsdf_depth_trunc: 1000.0
+    tsdf_min_depth: 0.000001
+    tsdf_pixel_stride: 1
+    tsdf_keep_clusters: 50
+    tsdf_min_triangles: 50
+
+  bundle_adjustment:
+    bundle_adjustment: 0
+    ba_max_keypoints: 2048
+    ba_pair_window: 2
+    ba_ratio_test: 0.8
+    ba_max_reproj_error: 8.0
+    ba_refine_intrinsics: 0
 
   dom:
     render_dom: 0
@@ -114,50 +127,11 @@ params:
 
   gsplat:
     gsplat_refine: 0
-    gsplat_steps: 30000
-    gsplat_max_gaussians: 5000000
-    gsplat_batch_views: 2
-    gsplat_render_scale: 1.0
-    gsplat_single_max_images: 300
-    gsplat_max_images_per_bundle: 250
-    gsplat_min_core_images_per_bundle: 200
-    gsplat_optimize_pose: 0
-    gsplat_save_rendered_views: 1
-    gsplat_render_output_max_views: 12
-    gsplat_render_output_stride: 1
-    gsplat_strategy: default
-    gsplat_sh_degree: 3
-    gsplat_sh_degree_interval: 1000
-    gsplat_init_opacity: 0.1
-    gsplat_init_scale: 1.0
-    gsplat_ssim_lambda: 0.2
-    gsplat_means_lr: 1.6e-4
-    gsplat_scales_lr: 5e-3
-    gsplat_opacities_lr: 5e-2
-    gsplat_quats_lr: 1e-3
-    gsplat_sh0_lr: 2.5e-3
-    gsplat_shN_lr: 1.25e-4
-    gsplat_pose_lr: 1e-5
-    gsplat_pose_reg: 1e-6
-    gsplat_opacity_reg: 0.0
-    gsplat_scale_reg: 0.0
-    gsplat_refine_start_iter: 500
-    gsplat_refine_stop_iter: 15000
-    gsplat_refine_every: 100
-    gsplat_reset_every: 3000
-    gsplat_prune_opa: 0.005
-    gsplat_grow_grad2d: 0.0002
-    gsplat_grow_scale3d: 0.01
-    gsplat_grow_scale2d: 0.05
-    gsplat_prune_scale3d: 0.1
-    gsplat_prune_scale2d: 0.15
-    gsplat_absgrad: 0
-    gsplat_strategy_quiet: 1
-    gsplat_packed: 0
-    gsplat_sparse_grad: 0
-    gsplat_visible_adam: 0
-    gsplat_antialiased: 0
-    gsplat_random_bkgd: 0
+    gsplat_steps: 7000
+    gsplat_max_gaussians: 300000
+    gsplat_render_scale: 0.5
+    gsplat_bundle_images: 80
+    gsplat_save_rendered_views: 0
 
   logging:
     log_chunks: 0

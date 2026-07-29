@@ -1,5 +1,0 @@
-defaults:
-  - test: default
-  - val: default
-  - train: default
-  

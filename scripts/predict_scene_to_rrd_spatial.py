@@ -50,6 +50,7 @@ except Exception:  # pragma: no cover - tqdm is optional at runtime
 
 from geoff3d.spatial_rrd.scene_io import (
     build_views_from_scene,
+    intrinsics_from_views,
     load_chunk_views_from_scene,
     resolve_device,
 )
@@ -101,10 +102,6 @@ from geoff3d.spatial_rrd.rrd_writer import (
     save_spatial_rrd,
     input_pose_centers_by_stem,
 )
-from geoff3d.spatial_rrd.multiview_consistency import (
-    intrinsics_from_views,
-    apply_mvsnet_style_multiview_filter,
-)
 from geoff3d.spatial_rrd.pose_perturb import perturb_scene_camera_poses
 from geoff3d.spatial_rrd.gsplat_bundle import (
     build_gsplat_optimization_bundles,
@@ -124,6 +121,8 @@ from geoff3d.spatial_rrd.chunk_transform import (
     compose_record_similarity,
     get_transformed_cameras,
 )
+from geoff3d.spatial_rrd.tsdf_mesh import export_tsdf_mesh
+from geoff3d.spatial_rrd.bundle_adjustment import run_bundle_adjustment
 
 
 def apply_final_global_pose_alignment(
@@ -506,225 +505,42 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="保存每个 chunk/view 的 confidence、过滤 mask、过滤前后 depth 和 RGB 调试图",
     )
-    g.add_argument(
-        "--mv_consistency",
-        action="store_true",
-        help="启用 MVSNet-style 多视角几何一致性过滤（所有chunk预测结束后统一执行）",
-    )
-    g.add_argument(
-        "--mv_min_support",
-        type=int,
-        default=1,
-        help="每个点至少需要多少个邻近视角支持；0 表示禁用",
-    )
-    g.add_argument(
-        "--mv_max_neighbors",
-        type=int,
-        default=4,
-        help="每个 source view 最多检查多少个最近邻 target view",
-    )
-    g.add_argument(
-        "--mv_conf_threshold",
-        type=float,
-        default=0.0,
-        help="几何一致性 confidence 阈值；confidence=support/evidence",
-    )
-    g.add_argument(
-        "--mv_depth_abs_tol",
-        type=float,
-        default=0.05,
-        help="MVSNet-style 深度一致性绝对阈值",
-    )
-    g.add_argument(
-        "--mv_depth_rel_tol",
-        type=float,
-        default=0.02,
-        help="MVSNet-style 深度一致性相对阈值",
-    )
-    g.add_argument(
-        "--mv_point_abs_tol",
-        type=float,
-        default=0.25,
-        help="world pointmap 3D 一致性绝对距离阈值，单位同点云坐标",
-    )
-    g.add_argument(
-        "--mv_point_rel_tol",
-        type=float,
-        default=0.02,
-        help="world pointmap 3D 一致性相对距离阈值，按目标深度缩放",
-    )
-    g.add_argument(
-        "--mv_no_point_check",
-        action="store_true",
-        help="只做 MVSNet-style depth consistency，不做 world point 3D 距离检查",
-    )
-
     # ╔══════════════════════════════════════════════════════════════════
     # ║  3DGS refinement  (Optional, default off)
     # ╚══════════════════════════════════════════════════════════════════
+    g = p.add_argument_group("TSDF mesh export")
+    g.add_argument("--export_tsdf_mesh", action="store_true")
+    g.add_argument("--tsdf_output_dir", default=None)
+    g.add_argument("--tsdf_voxel_size", type=float, default=0.05)
+    g.add_argument(
+        "--tsdf_sdf_trunc", type=float, default=-1.0,
+        help="TSDF truncation distance; <=0 uses 5 * voxel size",
+    )
+    g.add_argument("--tsdf_depth_trunc", type=float, default=1000.0)
+    g.add_argument("--tsdf_min_depth", type=float, default=1e-6)
+    g.add_argument(
+        "--tsdf_pixel_stride", type=int, default=2,
+        help="Integrate every Nth filtered RGB-D pixel into one global TSDF volume",
+    )
+    g.add_argument("--tsdf_keep_clusters", type=int, default=50)
+    g.add_argument("--tsdf_min_triangles", type=int, default=50)
+
+    g = p.add_argument_group("Bundle adjustment")
+    g.add_argument("--bundle_adjustment", action="store_true")
+    g.add_argument("--ba_output_dir", default=None)
+    g.add_argument("--ba_max_keypoints", type=int, default=2048)
+    g.add_argument("--ba_pair_window", type=int, default=2)
+    g.add_argument("--ba_ratio_test", type=float, default=0.8)
+    g.add_argument("--ba_max_reproj_error", type=float, default=8.0)
+    g.add_argument("--ba_refine_intrinsics", action="store_true")
+
     g = p.add_argument_group("3DGS 优化（默认关闭）")
-    g.add_argument(
-        "--gsplat_refine",
-        action="store_true",
-        help="启用 gsplat 3DGS bundle 优化；默认关闭，在所有chunk预测后统一执行",
-    )
-    g.add_argument(
-        "--gsplat_steps",
-        type=int,
-        default=3000,
-        help="每个 3DGS bundle 的优化步数；200~500 仅适合 smoke test，默认 3000",
-    )
-    g.add_argument(
-        "--gsplat_max_gaussians",
-        type=int,
-        default=120000,
-        help="每个 3DGS bundle 最多采样多少个 Gaussian；<=0 表示使用全部",
-    )
-    g.add_argument(
-        "--gsplat_batch_views",
-        type=int,
-        default=2,
-        help="每步随机优化多少个视角；<=0 表示使用全部",
-    )
-    g.add_argument(
-        "--gsplat_render_scale",
-        type=float,
-        default=0.5,
-        help="优化渲染分辨率比例；0.5 表示半分辨率",
-    )
-    g.add_argument(
-        "--gsplat_no_pose_opt",
-        action="store_true",
-        help="禁用相机外参同步优化，仅优化 Gaussians",
-    )
-    g.add_argument(
-        "--gsplat_single_max_images",
-        type=int,
-        default=80,
-        help="场景图像数<=此值时用单个 scene 级 3DGS；<=0 永远单个",
-    )
-    g.add_argument(
-        "--gsplat_max_images_per_bundle",
-        type=int,
-        default=80,
-        help="大场景分 bundle 后每个 3DGS bundle 最多渲染图像数",
-    )
-    g.add_argument(
-        "--gsplat_min_core_images_per_bundle",
-        type=int,
-        default=24,
-        help="每个 3DGS bundle 尽量包含的最少 core 图像数",
-    )
-    g.add_argument(
-        "--gsplat_log_every",
-        type=int,
-        default=50,
-        help="gsplat 优化每隔多少 step 打印/记录一次 loss；<=0 只记录最后一步",
-    )
-    g.add_argument(
-        "--gsplat_no_tqdm",
-        action="store_true",
-        help="禁用 gsplat tqdm 进度条，只使用普通 print log",
-    )
-    g.add_argument(
-        "--gsplat_save_rendered_views",
-        action="store_true",
-        help="gsplat 优化结束后保存部分 render RGB/depth/target/error PNG 到 bundle 目录",
-    )
-    g.add_argument(
-        "--gsplat_render_output_max_views",
-        type=int,
-        default=12,
-        help="每个 gsplat bundle 最多保存多少个渲染预览视角；<=0 表示全部保存",
-    )
-    g.add_argument(
-        "--gsplat_render_output_stride",
-        type=int,
-        default=1,
-        help="保存渲染预览时的视角步长",
-    )
-
-    # Official-style gsplat trainer parameters.
-    g.add_argument(
-        "--gsplat_strategy",
-        default="default",
-        choices=["default", "mcmc", "none"],
-        help="gsplat 官方 densification/pruning 策略：default / mcmc / none",
-    )
-    g.add_argument(
-        "--gsplat_sh_degree",
-        type=int,
-        default=3,
-        help="3DGS spherical harmonics degree；0 表示只用 DC 颜色",
-    )
-    g.add_argument(
-        "--gsplat_sh_degree_interval",
-        type=int,
-        default=1000,
-        help="每隔多少 step 提升一次 SH degree",
-    )
-    g.add_argument("--gsplat_init_opacity", type=float, default=0.1)
-    g.add_argument("--gsplat_init_scale", type=float, default=1.0)
-    g.add_argument("--gsplat_ssim_lambda", type=float, default=0.2)
-
-    g.add_argument("--gsplat_means_lr", type=float, default=1.6e-4)
-    g.add_argument("--gsplat_scales_lr", type=float, default=5e-3)
-    g.add_argument("--gsplat_opacities_lr", type=float, default=5e-2)
-    g.add_argument("--gsplat_quats_lr", type=float, default=1e-3)
-    g.add_argument("--gsplat_sh0_lr", type=float, default=2.5e-3)
-    g.add_argument("--gsplat_shN_lr", type=float, default=2.5e-3 / 20.0)
-
-    g.add_argument("--gsplat_pose_lr", type=float, default=1e-5)
-    g.add_argument("--gsplat_pose_reg", type=float, default=1e-6)
-    g.add_argument("--gsplat_opacity_reg", type=float, default=0.0)
-    g.add_argument("--gsplat_scale_reg", type=float, default=0.0)
-
-    g.add_argument("--gsplat_refine_start_iter", type=int, default=500)
-    g.add_argument("--gsplat_refine_stop_iter", type=int, default=15000)
-    g.add_argument("--gsplat_refine_every", type=int, default=100)
-    g.add_argument("--gsplat_reset_every", type=int, default=3000)
-    g.add_argument("--gsplat_prune_opa", type=float, default=0.005)
-    g.add_argument("--gsplat_grow_grad2d", type=float, default=0.0002)
-    g.add_argument("--gsplat_grow_scale3d", type=float, default=0.01)
-    g.add_argument("--gsplat_grow_scale2d", type=float, default=0.05)
-    g.add_argument("--gsplat_prune_scale3d", type=float, default=0.1)
-    g.add_argument("--gsplat_prune_scale2d", type=float, default=0.15)
-    g.add_argument(
-        "--gsplat_absgrad",
-        action="store_true",
-        help="使用 AbsGS 风格 absolute gradient；开启后 grow_grad2d 通常要调大",
-    )
-    g.add_argument(
-        "--gsplat_strategy_quiet",
-        action="store_true",
-        help="关闭 strategy verbose log",
-    )
-
-    g.add_argument(
-        "--gsplat_packed",
-        action="store_true",
-        help="gsplat packed rasterization，省显存但可能慢一些",
-    )
-    g.add_argument(
-        "--gsplat_sparse_grad",
-        action="store_true",
-        help="使用 sparse gradient；需要 packed=True",
-    )
-    g.add_argument(
-        "--gsplat_visible_adam",
-        action="store_true",
-        help="使用 gsplat SelectiveAdam / visible Adam",
-    )
-    g.add_argument(
-        "--gsplat_antialiased",
-        action="store_true",
-        help="使用 antialiased rasterization",
-    )
-    g.add_argument(
-        "--gsplat_random_bkgd",
-        action="store_true",
-        help="训练时使用随机背景，减少透明度作弊",
-    )
+    g.add_argument("--gsplat_refine", action="store_true")
+    g.add_argument("--gsplat_steps", type=int, default=7000)
+    g.add_argument("--gsplat_max_gaussians", type=int, default=300000)
+    g.add_argument("--gsplat_render_scale", type=float, default=0.5)
+    g.add_argument("--gsplat_bundle_images", type=int, default=80)
+    g.add_argument("--gsplat_save_rendered_views", action="store_true")
 
     # ╔══════════════════════════════════════════════════════════════════
     # ║  DOM rendering  (Optional, default off)
@@ -1701,145 +1517,13 @@ def apply_depth_confidence_filter_to_preds(
     }, keep_masks
 
 
-def apply_deferred_multiview_filter_to_chunk_records(
-    chunk_records: List[Dict[str, object]],
-    args: argparse.Namespace,
-    device: torch.device,
-    run_logger: Optional[RunLogger] = None,
-) -> None:
-    """Apply multi-view consistency after all chunks have been predicted."""
-    if not args.mv_consistency:
-        return
-
-    print(
-        "[INFO] Applying deferred multi-view consistency filtering "
-        "after all chunk predictions."
-    )
-
-    scene_before = 0
-    scene_after = 0
-
-    mv_iter = iter_progress(
-        chunk_records,
-        desc="MV consistency",
-        total=len(chunk_records),
-        enabled=bool(getattr(args, "chunk_tqdm", True)),
-    )
-    for record in mv_iter:
-        chunk_id = int(record["chunk_id"])
-        cached = load_chunk_cache(
-            record,
-            keys=[
-                "_pred_maps",
-                "_pred_valid_masks",
-                "_chunk_intrinsics",
-                "_chunk_point_local_indices",
-                "_core_local_indices",
-                "rgbs",
-            ],
-        )
-
-        pred_maps = cached.get("_pred_maps", None)
-        pred_valid_masks = cached.get("_pred_valid_masks", None)
-        chunk_intrinsics = cached.get("_chunk_intrinsics", None)
-        chunk_point_local_indices = cached.get("_chunk_point_local_indices", None)
-        core_local_indices = cached.get("_core_local_indices", None)
-        rgbs = cached.get("rgbs", None)
-
-        if (
-            pred_maps is None
-            or pred_valid_masks is None
-            or chunk_intrinsics is None
-            or chunk_point_local_indices is None
-            or core_local_indices is None
-            or rgbs is None
-        ):
-            record["mv_consistency_meta"] = {
-                "enabled": False,
-                "reason": "missing deferred mv cached fields",
-            }
-            continue
-
-        filtered_masks, mv_meta = apply_mvsnet_style_multiview_filter(
-            pred_maps=pred_maps,
-            pred_valid_masks=pred_valid_masks,
-            pred_cams=record["pred_cams"],
-            intrinsics=chunk_intrinsics,
-            device=device,
-            enabled=True,
-            min_support=int(args.mv_min_support),
-            max_neighbors=int(args.mv_max_neighbors),
-            conf_threshold=float(args.mv_conf_threshold),
-            depth_abs_tol=float(args.mv_depth_abs_tol),
-            depth_rel_tol=float(args.mv_depth_rel_tol),
-            point_abs_tol=float(args.mv_point_abs_tol),
-            point_rel_tol=float(args.mv_point_rel_tol),
-            min_depth=float(args.pred_min_depth),
-            use_point_check=not bool(args.mv_no_point_check),
-        )
-
-        chunk_points, chunk_colors = points_from_maps(
-            pred_maps=pred_maps,
-            pred_valid_masks=filtered_masks,
-            rgbs=rgbs,
-            local_indices=chunk_point_local_indices,
-        )
-        core_points, core_colors = points_from_maps(
-            pred_maps=pred_maps,
-            pred_valid_masks=filtered_masks,
-            rgbs=rgbs,
-            local_indices=core_local_indices,
-        )
-
-        update_chunk_cache(
-            record,
-            {
-                "chunk_pred_points": chunk_points,
-                "chunk_pred_colors": chunk_colors,
-                "core_pred_points": core_points,
-                "core_pred_colors": core_colors,
-                "_pred_valid_masks": filtered_masks,
-            },
-        )
-        record["mv_consistency_meta"] = mv_meta
-        record["num_chunk_pred_points_filtered"] = int(chunk_points.shape[0])
-        record["num_core_pred_points"] = int(core_points.shape[0])
-
-        before = int(mv_meta.get("total_before", 0))
-        after = int(mv_meta.get("total_after", 0))
-        scene_before += before
-        scene_after += after
-
-        if hasattr(mv_iter, "set_postfix"):
-            mv_iter.set_postfix(
-                chunk=f"{chunk_id:03d}",
-                keep=f"{float(mv_meta.get('keep_ratio', 1.0)):.3f}",
-                after=after,
-            )
-        if run_logger is not None:
-            run_logger.detail(
-                f"[chunk {chunk_id:03d}] deferred mv consistency: "
-                f"before={before}, after={after}, dropped={before - after}, "
-                f"keep_ratio={float(mv_meta.get('keep_ratio', 1.0)):.3f}, "
-                f"support>={args.mv_min_support}, neighbors<={args.mv_max_neighbors}, "
-                f"conf>={args.mv_conf_threshold}"
-            )
-
-    print(
-        "[INFO] Deferred multi-view filtering summary: "
-        f"before={scene_before}, after={scene_after}, "
-        f"dropped={scene_before - scene_after}, "
-        f"keep_ratio={scene_after / max(scene_before, 1):.3f}"
-    )
-
-
 def run_deferred_dom_rendering(
     chunk_records: List[Dict[str, object]],
     args: argparse.Namespace,
     device: torch.device,
     gsplat_summary: Optional[Dict[str, object]] = None,
 ) -> Optional[Dict[str, object]]:
-    """Render a full DOM after all chunks and optional MV filtering.
+    """Render a full DOM after all chunks.
 
     When --gsplat_refine is enabled and optimized bundles exist, DOM is rendered
     from the optimized 3DGS gaussians.npz. Otherwise falls back to raw pred_maps.
@@ -1965,9 +1649,9 @@ def run_deferred_gsplat_bundle_refinement(
 
     bundles = build_gsplat_optimization_bundles(
         chunk_records=chunk_records,
-        single_max_images=int(args.gsplat_single_max_images),
-        max_images_per_bundle=int(args.gsplat_max_images_per_bundle),
-        min_core_images_per_bundle=int(args.gsplat_min_core_images_per_bundle),
+        single_max_images=int(args.gsplat_bundle_images),
+        max_images_per_bundle=int(args.gsplat_bundle_images),
+        min_core_images_per_bundle=max(8, int(args.gsplat_bundle_images) // 3),
     )
 
     print(
@@ -2019,59 +1703,59 @@ def run_deferred_gsplat_bundle_refinement(
             device=device,
             steps=int(args.gsplat_steps),
             max_gaussians=int(args.gsplat_max_gaussians),
-            batch_views=int(args.gsplat_batch_views),
+            batch_views=1,
             render_scale=float(args.gsplat_render_scale),
             seed=int(args.seed) + 910001 + bundle_id,
 
             # official-style splat params
-            sh_degree=int(args.gsplat_sh_degree),
-            sh_degree_interval=int(args.gsplat_sh_degree_interval),
-            init_opacity=float(args.gsplat_init_opacity),
-            init_scale=float(args.gsplat_init_scale),
-            ssim_lambda=float(args.gsplat_ssim_lambda),
-            means_lr=float(args.gsplat_means_lr),
-            scales_lr=float(args.gsplat_scales_lr),
-            opacities_lr=float(args.gsplat_opacities_lr),
-            quats_lr=float(args.gsplat_quats_lr),
-            sh0_lr=float(args.gsplat_sh0_lr),
-            shN_lr=float(args.gsplat_shN_lr),
+            sh_degree=3,
+            sh_degree_interval=1000,
+            init_opacity=0.1,
+            init_scale=1.0,
+            ssim_lambda=0.2,
+            means_lr=1.6e-4,
+            scales_lr=5e-3,
+            opacities_lr=5e-2,
+            quats_lr=1e-3,
+            sh0_lr=2.5e-3,
+            shN_lr=1.25e-4,
 
             # strategy
-            strategy_name=str(args.gsplat_strategy),
-            refine_start_iter=int(args.gsplat_refine_start_iter),
-            refine_stop_iter=int(args.gsplat_refine_stop_iter),
-            refine_every=int(args.gsplat_refine_every),
-            reset_every=int(args.gsplat_reset_every),
-            prune_opa=float(args.gsplat_prune_opa),
-            grow_grad2d=float(args.gsplat_grow_grad2d),
-            grow_scale3d=float(args.gsplat_grow_scale3d),
-            grow_scale2d=float(args.gsplat_grow_scale2d),
-            prune_scale3d=float(args.gsplat_prune_scale3d),
-            prune_scale2d=float(args.gsplat_prune_scale2d),
-            absgrad=bool(args.gsplat_absgrad),
-            strategy_verbose=not bool(args.gsplat_strategy_quiet),
+            strategy_name="default",
+            refine_start_iter=500,
+            refine_stop_iter=max(500, int(args.gsplat_steps) - 500),
+            refine_every=100,
+            reset_every=3000,
+            prune_opa=0.005,
+            grow_grad2d=0.0002,
+            grow_scale3d=0.01,
+            grow_scale2d=0.05,
+            prune_scale3d=0.1,
+            prune_scale2d=0.15,
+            absgrad=False,
+            strategy_verbose=False,
 
             # optimization behavior
             optimize_means=True,
-            optimize_pose=not bool(args.gsplat_no_pose_opt),
-            pose_lr=float(args.gsplat_pose_lr),
-            pose_reg=float(args.gsplat_pose_reg),
-            opacity_reg=float(args.gsplat_opacity_reg),
-            scale_reg=float(args.gsplat_scale_reg),
+            optimize_pose=False,
+            pose_lr=1e-5,
+            pose_reg=0.0,
+            opacity_reg=0.0,
+            scale_reg=0.0,
 
             # rasterization / optimizer mode
-            packed=bool(args.gsplat_packed),
-            sparse_grad=bool(args.gsplat_sparse_grad),
-            visible_adam=bool(args.gsplat_visible_adam),
-            antialiased=bool(args.gsplat_antialiased),
-            random_bkgd=bool(args.gsplat_random_bkgd),
+            packed=False,
+            sparse_grad=False,
+            visible_adam=False,
+            antialiased=True,
+            random_bkgd=False,
 
             # logging/output
-            log_every=int(args.gsplat_log_every),
-            use_tqdm=not bool(args.gsplat_no_tqdm),
+            log_every=100,
+            use_tqdm=True,
             save_rendered_views=bool(args.gsplat_save_rendered_views),
-            render_output_max_views=int(args.gsplat_render_output_max_views),
-            render_output_stride=int(args.gsplat_render_output_stride),
+            render_output_max_views=12,
+            render_output_stride=1,
         )
         all_meta.append(gs_meta)
 
@@ -2088,9 +1772,7 @@ def run_deferred_gsplat_bundle_refinement(
         "enabled": True,
         "output_dir": str(output_dir),
         "num_bundles": int(len(all_meta)),
-        "single_max_images": int(args.gsplat_single_max_images),
-        "max_images_per_bundle": int(args.gsplat_max_images_per_bundle),
-        "min_core_images_per_bundle": int(args.gsplat_min_core_images_per_bundle),
+        "bundle_images": int(args.gsplat_bundle_images),
         "bundles": all_meta,
     }
 
@@ -2506,10 +2188,6 @@ def main() -> None:
     run_logger.install()
     stage("Setup", f"scene={args.scene_dir}, output={args.output_rrd}, model={args.model}")
 
-    # Early validation: sparse_grad requires packed.
-    if args.gsplat_sparse_grad and not args.gsplat_packed:
-        raise ValueError("--gsplat_sparse_grad requires --gsplat_packed")
-
     device = resolve_device(args.device)
     stage_timings: Dict[str, float] = {
         "chunking": 0.0,
@@ -2798,9 +2476,10 @@ def main() -> None:
                 "chunk_data_loading_and_preprocessing",
                 "prediction_postprocessing",
                 "cache_io",
-                "multiview_consistency",
                 "seam_error_evaluation",
                 "rrd_and_eval_saving",
+                "bundle_adjustment",
+                "tsdf_mesh_export",
                 "gsplat_optimization",
                 "dom_generation",
             ],
@@ -2811,7 +2490,6 @@ def main() -> None:
             "peak_gpu_memory_reserved_mib": float(peak_gpu_memory["peak_reserved_mib"]),
             "num_frames": int(len(views)),
             "num_chunks": int(len(chunk_records)),
-            "mv_consistency": bool(args.mv_consistency),
             "post_chunk_align": bool(args.post_chunk_align),
             "post_chunk_align_mode": str(args.post_chunk_align_mode),
             "post_chunk_align_num_valid_edges": int(
@@ -3154,10 +2832,6 @@ def main() -> None:
                 "chunk_id": int(chunk_id),
             }
 
-        mv_consistency_meta: Dict[str, object] = {
-            "enabled": False,
-            "deferred": bool(args.mv_consistency),
-        }
         gsplat_meta: Dict[str, object] = {
             "enabled": False,
             "deferred": bool(args.gsplat_refine),
@@ -3197,7 +2871,6 @@ def main() -> None:
             "pred_cams": pred_cams,
             "align_meta": align_meta,
             "depth_conf_filter_meta": depth_conf_filter_meta,
-            "mv_consistency_meta": mv_consistency_meta,
             "gsplat_meta": gsplat_meta,
             "num_chunk_pred_points_raw": int(raw_points.shape[0]),
             "num_chunk_pred_points_filtered": int(pred_points.shape[0]),
@@ -3273,21 +2946,7 @@ def main() -> None:
     print("[INFO] Model deleted, GPU cache cleared.")
 
     # ------------------------------------------------------------------
-    # 10. Deferred MV consistency (runs before save_spatial_rrd so eval
-    #     reflects post-filter results)
-    # ------------------------------------------------------------------
-    stage("Deferred MV Consistency", "filtering cached per-chunk predictions")
-    apply_deferred_multiview_filter_to_chunk_records(
-        chunk_records=chunk_records,
-        args=args,
-        device=device,
-        run_logger=run_logger,
-    )
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-    # ------------------------------------------------------------------
-    # 10.5 Deferred chunk post-alignment
+    # 10. Deferred chunk post-alignment
     # ------------------------------------------------------------------
     stage("Deferred Chunk Alignment", f"enabled={bool(args.post_chunk_align)}")
     post_align_time_start = time.perf_counter()
@@ -3353,6 +3012,29 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
+    stage("Bundle Adjustment", f"enabled={bool(args.bundle_adjustment)}")
+    if bool(args.bundle_adjustment):
+        ba_output_dir = (
+            Path(args.ba_output_dir).expanduser()
+            if args.ba_output_dir
+            else Path(args.output_rrd).expanduser().with_suffix("") / "bundle_adjustment"
+        )
+        ba_summary = run_bundle_adjustment(
+            chunk_records,
+            ba_output_dir,
+            max_keypoints=int(args.ba_max_keypoints),
+            pair_window=int(args.ba_pair_window),
+            ratio_test=float(args.ba_ratio_test),
+            max_reproj_error=float(args.ba_max_reproj_error),
+            refine_intrinsics=bool(args.ba_refine_intrinsics),
+        )
+        post_chunk_align_summary["bundle_adjustment"] = ba_summary
+        print(
+            "[INFO] Bundle adjustment complete: "
+            f"images={ba_summary['num_images']}, tracks={ba_summary['num_tracks']}, "
+            f"output={ba_summary['sparse_dir']}"
+        )
+
     stage("Timing", "writing processing_time.json")
     processing_time_meta = build_processing_time_meta(
         post_align_summary=post_chunk_align_summary,
@@ -3369,7 +3051,7 @@ def main() -> None:
     print(f"Saved processing timing: {timing_path}")
 
     # ------------------------------------------------------------------
-    # 11. Save RRD/eval (after MV consistency filtering)
+    # 11. Save RRD/eval
     # ------------------------------------------------------------------
     stage("Save RRD and Eval", f"output={args.output_rrd}")
     save_spatial_rrd(
@@ -3412,7 +3094,36 @@ def main() -> None:
     )
 
     # ------------------------------------------------------------------
-    # 12. Deferred 3DGS bundle optimization
+    # 12. Optional bounded TSDF mesh extraction
+    # ------------------------------------------------------------------
+    stage("TSDF Mesh", f"enabled={bool(args.export_tsdf_mesh)}")
+    if bool(args.export_tsdf_mesh):
+        tsdf_output_dir = (
+            Path(args.tsdf_output_dir).expanduser()
+            if args.tsdf_output_dir
+            else Path(args.output_rrd).expanduser().with_suffix("") / "mesh"
+        )
+        tsdf_summary = export_tsdf_mesh(
+            chunk_records,
+            tsdf_output_dir,
+            voxel_size=float(args.tsdf_voxel_size),
+            sdf_trunc=float(args.tsdf_sdf_trunc),
+            depth_trunc=float(args.tsdf_depth_trunc),
+            min_depth=float(args.tsdf_min_depth),
+            pixel_stride=int(args.tsdf_pixel_stride),
+            keep_clusters=int(args.tsdf_keep_clusters),
+            min_triangles=int(args.tsdf_min_triangles),
+        )
+        print(
+            "[INFO] TSDF mesh saved: "
+            f"views={tsdf_summary['num_integrated_views']}, "
+            f"vertices={tsdf_summary['post_vertices']}, "
+            f"triangles={tsdf_summary['post_triangles']}, "
+            f"path={tsdf_summary['post_mesh']}"
+        )
+
+    # ------------------------------------------------------------------
+    # 13. Deferred 3DGS bundle optimization
     # ------------------------------------------------------------------
     stage("Deferred 3DGS", f"enabled={bool(args.gsplat_refine)}")
     gsplat_summary = run_deferred_gsplat_bundle_refinement(
@@ -3424,7 +3135,7 @@ def main() -> None:
         torch.cuda.empty_cache()
 
     # ------------------------------------------------------------------
-    # 13. Deferred DOM rendering (after 3DGS, may use optimized gaussians)
+    # 14. Deferred DOM rendering (after 3DGS, may use optimized gaussians)
     # ------------------------------------------------------------------
     stage("Deferred DOM", f"enabled={bool(args.render_dom)}")
     dom_meta = run_deferred_dom_rendering(
