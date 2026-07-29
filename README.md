@@ -1,134 +1,101 @@
 # GeoFF3D
 
-GeoFF3D is a feed-forward 3D reconstruction model for UAV imagery. It conditions reconstruction on optional camera rays, depth, world translation, and world rotation priors, and includes a spatial chunking pipeline for large scenes.
-
-This repository contains only the code required to train GeoFF3D and run GeoFF3D, Pi3X, and VGGT inference baselines. Datasets, pretrained weights, checkpoints, and generated outputs are not included.
+GeoFF3D is a feed-forward 3D reconstruction framework for UAV imagery. It supports camera, depth, translation, and rotation priors, together with spatial chunking for large scenes.
 
 ## Installation
 
-Use Python 3.10 or newer. Install a CUDA-compatible PyTorch build first, then install GeoFF3D:
+Python 3.10+ and a CUDA-compatible PyTorch installation are recommended.
 
 ```bash
 git clone https://github.com/yanxian-ll/GeoFF3D.git
 cd GeoFF3D
-python -m pip install -e .
+pip install -e .
 ```
 
-The base Pi3X weight directory must contain `config.json` and `model.safetensors`. By default it is read from `checkpoints/pi3x`; use `PI3X_BASE_MODEL` to select another location.
+Place pretrained weights under `checkpoints/`. The default Pi3X path is `checkpoints/pi3x`; override it with `PI3X_BASE_MODEL` if needed.
 
-## Data configuration
-
-Training uses Hydra dataset definitions under `configs/dataset/`. Configure portable paths with:
+Configure the data and output paths:
 
 ```bash
-export GEOFF3D_DATA_ROOT=/path/to/data
-export GEOFF3D_METADATA_ROOT=/path/to/data/metadata
-export GEOFF3D_EXPERIMENTS_ROOT=/path/to/experiments
-export PI3X_BASE_MODEL=/path/to/pi3x
+export DATA_ROOT=/path/to/data
+export METADATA_ROOT=/path/to/metadata
+export EXPERIMENTS_ROOT=/path/to/experiments
 ```
 
-The two training datasets are configured by:
-
-- `configs/dataset/uavtrain_6d_224_many_ar_16ipg_2g.yaml`
-- `configs/dataset/uavtrain_6d_518_many_ar_16ipg_2g.yaml`
+Dataset configurations are located in `configs/dataset/`.
 
 ## Training
 
-Stage 1, where the argument is the number of local GPUs:
+The argument is the number of GPUs.
 
 ```bash
-bash bash_scripts/train/geoff3d_stage1.sh 8
+# GeoFF3D
+bash bash_scripts/train/geoff3d_stage1.sh 2
+bash bash_scripts/train/geoff3d_stage2.sh 2
+
+# Baselines
+bash bash_scripts/train/pi3_finetuning.sh 2
+bash bash_scripts/train/pi3x_finetuning.sh 2
+bash bash_scripts/train/vggt_finetuning.sh 2
+bash bash_scripts/train/vggt_omega.sh 2
 ```
 
-Stage 2 reads the Stage 1 checkpoint from the default experiment directory. To specify it explicitly:
+Stage 2 loads the default Stage 1 output automatically. To use another checkpoint:
 
 ```bash
-export STAGE1_CHECKPOINT=/path/to/geoff3d_stage1/checkpoint-last.pth
-bash bash_scripts/train/geoff3d_stage2.sh 8
+STAGE1_CHECKPOINT=/path/to/checkpoint-last.pth \
+bash bash_scripts/train/geoff3d_stage2.sh 2
 ```
 
-## Inference
+## Large-scene reconstruction
 
-The retained inference entry points are:
-
-```text
-bash_scripts/benchmark/uav_slam/ours/geoff3d.sh
-bash_scripts/benchmark/uav_slam/ours/geoff3d_gnss_perturb.sh
-bash_scripts/benchmark/uav_slam/ours/pi3x.sh
-bash_scripts/benchmark/uav_slam/ours/pi3x_gnss_perturb.sh
-bash_scripts/benchmark/uav_slam/ours/vggt.sh
-```
-
-`pi3x.sh` and `vggt.sh` run their fine-tuned checkpoints. Set `CHECKPOINT` to
-the corresponding checkpoint file. `pi3x_gnss_perturb.sh` evaluates the
-fine-tuned Pi3X model with configurable GNSS pose noise.
-
-Run GeoFF3D with a trained checkpoint and a scene-list YAML:
+Scene definitions are configured in `bash_scripts/benchmark/uav_slam/default_scenes.yaml`. Run a model with:
 
 ```bash
-CHECKPOINT=/path/to/geoff3d/checkpoint-best.pth \
-bash bash_scripts/benchmark/uav_slam/ours/geoff3d.sh \
-  --cuda-device 0 \
-  --scene-list /path/to/scenes.yaml \
-  --overwrite
-```
-
-Run the GNSS perturbation benchmark:
-
-```bash
-CHECKPOINT=/path/to/geoff3d/checkpoint-best.pth \
 bash bash_scripts/benchmark/uav_slam/ours/geoff3d_gnss_perturb.sh \
   --cuda-device 0 \
-  --scene-list /path/to/scenes.yaml \
+  --scene-list bash_scripts/benchmark/uav_slam/default_scenes.yaml \
   --overwrite
 ```
 
-The scene-list format is documented in `bash_scripts/benchmark/uav_slam/default_scenes.yaml`. Generated results are written below `outputs/` and are ignored by Git.
-
-To additionally export an Open3D TSDF mesh from the predicted core-view RGB-D
-maps, enable it for any retained inference script:
-
-Install the mesh dependency once with `pip install -e ".[mesh]"`.
-
-```bash
-EXPORT_TSDF_MESH=1 \
-TSDF_VOXEL_SIZE=0.05 \
-TSDF_DEPTH_TRUNC=1000 \
-CHECKPOINT=/path/to/checkpoint-best.pth \
-bash bash_scripts/benchmark/uav_slam/ours/geoff3d.sh \
-  --cuda-device 0 --scene-list /path/to/scenes.yaml
-```
-
-The raw and connected-component-filtered meshes are saved as
-`mesh/tsdf_mesh.ply` and `mesh/tsdf_mesh_post.ply` inside each scene result.
-
-Bundle adjustment is optional and disabled by default. It builds SIFT tracks
-between nearby frames and refines the predicted cameras with pycolmap:
-
-```bash
-pip install -e ".[ba]"
-BUNDLE_ADJUSTMENT=1 CHECKPOINT=/path/to/checkpoint-best.pth \
-bash bash_scripts/benchmark/uav_slam/ours/geoff3d.sh \
-  --cuda-device 0 --scene-list /path/to/scenes.yaml
-```
-
-The refined COLMAP reconstruction is written to `bundle_adjustment/sparse/`.
-The optional gsplat stage now exposes only the main controls:
-`GSPLAT_STEPS`, `GSPLAT_MAX_GAUSSIANS`, `GSPLAT_RENDER_SCALE`, and
-`GSPLAT_BUNDLE_IMAGES`.
-
-## Repository layout
+Available scripts:
 
 ```text
-geoff3d/                    Python package, models, training, losses, datasets
-configs/                    Hydra training and model configurations
-scripts/train.py            Distributed training entry point
-scripts/predict_scene_to_rrd_spatial.py
-geoff3d/spatial_rrd/        Spatial chunking and reconstruction pipeline
-bash_scripts/train/         Two-stage GeoFF3D training
-bash_scripts/benchmark/uav_slam/ours/
+geoff3d.sh
+geoff3d_gnss_perturb.sh
+pi3x.sh
+pi3x_gnss_perturb.sh
+vggt.sh
+vggt_omega.sh
 ```
+
+Each script uses its matching training output by default. A custom checkpoint can be supplied with:
+
+```bash
+CHECKPOINT=/path/to/checkpoint-best.pth \
+bash bash_scripts/benchmark/uav_slam/ours/geoff3d.sh \
+  --scene-list /path/to/scenes.yaml
+```
+
+Chunk size and reconstruction options are defined in `bash_scripts/benchmark/uav_slam/ours/default_params.yaml`. Results are written under `outputs/`.
+
+## Acknowledgements
+
+This project is developed primarily upon [MapAnything](https://github.com/facebookresearch/map-anything). We sincerely thank its authors for releasing their excellent work. We also thank the authors of [Pi3](https://github.com/yyfz/Pi3), [VGGT](https://github.com/facebookresearch/vggt), and the related open-source projects used by this repository.
 
 ## License
 
 See [LICENSE](LICENSE).
+
+## Citation
+
+If this repository is useful to your research, please cite the [UAVFF3D paper](https://arxiv.org/abs/2605.17942):
+
+```bibtex
+@article{yang2026uavff3d,
+  title={UAVFF3D: A Geometry-Aware Benchmark for Feed-Forward UAV 3D Reconstruction},
+  author={Yang, Xiang and Wang, Yongli and Li, HaiFeng and Zhang, Yunsheng},
+  journal={arXiv preprint arXiv:2605.17942},
+  year={2026}
+}
+```

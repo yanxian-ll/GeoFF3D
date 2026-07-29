@@ -24,7 +24,7 @@ torchrun --nproc_per_node ${NUM_GPUS} \
     model=geoff3d \
     model.task.world_translation_prob=0.7 \
     model.model_config.pretrained_model_name_or_path="${PI3X_BASE_MODEL:-./checkpoints/pi3x}" \
-    model.pretrained="${STAGE1_CHECKPOINT:-${GEOFF3D_EXPERIMENTS_ROOT:-./experiments}/uav_training/geoff3d_stage1_geoff3d_12v_4d_12ipg_2g/checkpoint-last.pth}" \
+    model.pretrained="${STAGE1_CHECKPOINT:-${EXPERIMENTS_ROOT:-./experiments}/uav_training/geoff3d_stage1_geoff3d_12v_4d_12ipg_2g/checkpoint-last.pth}" \
     model.model_config.translation_normalization=mean \
     model.model_config.de_normalize_outputs=true \
     model.model_config.force_rotation_prior_for_degenerate_translation=false \

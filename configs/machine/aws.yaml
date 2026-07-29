@@ -2,9 +2,9 @@ defaults:
   - default
 
 # Portable paths with optional environment-variable overrides.
-root_data_dir: ${oc.env:GEOFF3D_DATA_ROOT,../../dataset/data}
-geoff3d_dataset_metadata_dir: ${oc.env:GEOFF3D_METADATA_ROOT,${machine.root_data_dir}/metadata}
-root_pretrained_checkpoints_dir: ${oc.env:GEOFF3D_CHECKPOINTS_ROOT,./checkpoints}
-root_experiments_dir: ${oc.env:GEOFF3D_EXPERIMENTS_ROOT,./experiments}
+root_data_dir: ${oc.env:DATA_ROOT,../../dataset/data}
+geoff3d_dataset_metadata_dir: ${oc.env:METADATA_ROOT,${machine.root_data_dir}/metadata}
+root_pretrained_checkpoints_dir: ${oc.env:CHECKPOINTS_ROOT,./checkpoints}
+root_experiments_dir: ${oc.env:EXPERIMENTS_ROOT,./experiments}
 
 torch_hub_dir: ${machine.root_pretrained_checkpoints_dir}/torch_cache/hub
