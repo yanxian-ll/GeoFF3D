@@ -65,6 +65,7 @@ from geoff3d.spatial_rrd.chunk_cache import (
 from geoff3d.spatial_rrd.chunking import (
     CHUNK_ORDER_STRATEGIES,
     SPATIAL_PARTITIONS,
+    build_temporal_chunks,
     build_spatial_chunks,
     order_spatial_chunks,
 )
@@ -703,6 +704,15 @@ def parse_args() -> argparse.Namespace:
         help="空间分块方式：默认 footprint_tree；footprint_grid 用于固定格网消融",
     )
     g.add_argument(
+        "--footprint_estimation",
+        default="gt",
+        choices=["gt", "sequential"],
+        help=(
+            "footprint 来源：gt 使用输入 depth/pose；sequential "
+            "先按图像顺序无重叠前馈推理并与输入 translation 对齐"
+        ),
+    )
+    g.add_argument(
         "--pose_grid_size",
         type=float,
         default=0.0,
@@ -731,6 +741,30 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.25,
         help="temporal 分块中相邻 chunk 的图像重叠比例；默认 0.25",
+    )
+    g.add_argument(
+        "--predicted_footprint_sample_stride",
+        type=int,
+        default=8,
+        help="从对齐预测点图计算 footprint 时的像素采样步长",
+    )
+    g.add_argument(
+        "--predicted_footprint_min_points",
+        type=int,
+        default=32,
+        help="计算每帧预测 footprint 所需的最少有效点数",
+    )
+    g.add_argument(
+        "--predicted_footprint_quantile_min",
+        type=float,
+        default=0.02,
+        help="预测 footprint bbox 的下分位数",
+    )
+    g.add_argument(
+        "--predicted_footprint_quantile_max",
+        type=float,
+        default=0.98,
+        help="预测 footprint bbox 的上分位数",
     )
     g.add_argument(
         "--chunk_order",
@@ -2175,6 +2209,234 @@ def save_spatial_chunk_core_footprint_xy_visualization(
     return save_path
 
 
+def footprint_from_aligned_prediction(
+    point_map: np.ndarray,
+    valid_mask: np.ndarray,
+    aligned_camera: Optional[Dict[str, object]],
+    sample_stride: int,
+    min_points: int,
+    quantile_min: float,
+    quantile_max: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, str, int]:
+    """Compute one XY footprint from a translation-aligned predicted point map."""
+    points = np.asarray(point_map, dtype=np.float64)
+    mask = np.asarray(valid_mask, dtype=bool)
+    stride = max(1, int(sample_stride))
+    qmin = float(np.clip(quantile_min, 0.0, 1.0))
+    qmax = float(np.clip(quantile_max, 0.0, 1.0))
+    if qmax <= qmin:
+        raise ValueError(
+            "predicted footprint quantiles must satisfy "
+            f"0 <= min < max <= 1, got {qmin} and {qmax}"
+        )
+
+    sampled = points[::stride, ::stride]
+    sampled_mask = mask[::stride, ::stride]
+    if (
+        sampled.ndim == 3
+        and sampled.shape[-1] == 3
+        and sampled_mask.shape == sampled.shape[:2]
+    ):
+        sampled_mask = sampled_mask & np.isfinite(sampled).all(axis=-1)
+        xy = sampled[..., :2][sampled_mask]
+    else:
+        xy = np.empty((0, 2), dtype=np.float64)
+
+    if xy.shape[0] > 0:
+        center = np.median(xy, axis=0)
+        bbox_min = np.quantile(xy, qmin, axis=0)
+        bbox_max = np.quantile(xy, qmax, axis=0)
+        source = (
+            "predicted_aligned"
+            if xy.shape[0] >= max(1, int(min_points))
+            else "predicted_aligned_sparse"
+        )
+        return center, bbox_min, bbox_max, source, int(xy.shape[0])
+
+    if aligned_camera is not None:
+        T_c2w = np.asarray(aligned_camera.get("T_c2w"), dtype=np.float64)
+        if T_c2w.shape == (4, 4) and np.isfinite(T_c2w[:2, 3]).all():
+            center = T_c2w[:2, 3].copy()
+            return center, center.copy(), center.copy(), "camera_translation_fallback", 0
+
+    nan_xy = np.full((2,), np.nan, dtype=np.float64)
+    return nan_xy, nan_xy.copy(), nan_xy.copy(), "invalid", 0
+
+
+def estimate_footprints_sequentially(
+    *,
+    model: torch.nn.Module,
+    model_name: str,
+    views: Sequence[Dict[str, object]],
+    meta: Dict[str, object],
+    prior_policy: Dict[str, object],
+    device: torch.device,
+    recenter_state: Optional[np.ndarray],
+    norm_type: str,
+    args: argparse.Namespace,
+) -> Dict[str, object]:
+    """Estimate footprints in a preliminary, ordered, non-overlapping pass."""
+    chunks, _ = build_temporal_chunks(
+        meta=meta,
+        max_chunk_size=int(args.max_chunk_size),
+        min_chunk_size=int(args.min_chunk_size),
+        max_chunks=0,
+        overlap_ratio=0.0,
+        merge_small_tail=True,
+    )
+    chunks, _ = order_spatial_chunks(
+        chunks,
+        meta=meta,
+        strategy="sequential",
+    )
+    align_mode = (
+        "pose_scale_yaw_translation"
+        if model_name == "geoff3d"
+        else "pose_sim3"
+    )
+    reference_cams = input_pose_centers_by_stem(meta)
+    if not reference_cams:
+        raise ValueError(
+            "sequential footprint estimation requires input "
+            "camera translations for all selected images."
+        )
+
+    num_frames = len(meta["stems"])
+    centers = np.full((num_frames, 2), np.nan, dtype=np.float64)
+    bbox_mins = np.full_like(centers, np.nan)
+    bbox_maxs = np.full_like(centers, np.nan)
+    sources = ["not_processed"] * num_frames
+    point_counts = [0] * num_frames
+    alignment_records: List[Dict[str, object]] = []
+
+    print(
+        "[INFO] Preliminary footprint pass: "
+        f"chunks={len(chunks)}, overlap=0, align={align_mode}"
+    )
+    for chunk in iter_progress(
+        chunks,
+        desc="Estimate footprints",
+        total=len(chunks),
+        enabled=bool(args.chunk_tqdm),
+    ):
+        chunk_id = int(chunk["chunk_id"])
+        indices = [int(i) for i in chunk["indices"]]
+        stems = [meta["stems"][i] for i in indices]
+        chunk_views_raw, rgbs = load_chunk_views_from_scene(
+            lightweight_views=views,
+            meta=meta,
+            indices=indices,
+            prior_policy=prior_policy,
+            device=device,
+            recenter_anchor=recenter_state,
+            num_workers=args.scene_io_workers,
+            norm_type=norm_type,
+        )
+        chunk_views = filter_views_for_prior_policy(
+            chunk_views_raw, prior_policy
+        )
+        with torch.no_grad():
+            preds = model(chunk_views)
+        _, _, pred_maps, valid_masks, raw_cams = collect_pred_outputs(
+            preds=preds,
+            rgbs=rgbs,
+            pred_min_depth=args.pred_min_depth,
+            conf_quantile=0.0,
+            stems=stems,
+            collect_point_indices=[],
+        )
+        if recenter_state is not None:
+            empty_points = np.empty((0, 3), dtype=np.float32)
+            empty_colors = np.empty((0, 3), dtype=np.uint8)
+            _, _, pred_maps, raw_cams = restore_predictions_from_recenter(
+                empty_points,
+                empty_colors,
+                pred_maps,
+                raw_cams,
+                recenter_state,
+            )
+        empty_points = np.empty((0, 3), dtype=np.float32)
+        empty_colors = np.empty((0, 3), dtype=np.uint8)
+        _, _, aligned_maps, aligned_cams, align_meta = (
+            apply_chunk_pose_alignment(
+                mode=align_mode,
+                chunk_id=chunk_id,
+                reference_cams_by_stem=reference_cams,
+                raw_pred_points=empty_points,
+                raw_pred_colors=empty_colors,
+                pred_maps=pred_maps,
+                raw_pred_cams=raw_cams,
+                target_stems=stems,
+                seed=int(args.seed) + 61001 + chunk_id,
+            )
+        )
+        if not bool(align_meta.get("valid", False)):
+            raise RuntimeError(
+                "Preliminary footprint translation alignment failed for "
+                f"chunk {chunk_id}: {align_meta.get('note', 'unknown error')}"
+            )
+        alignment_records.append(align_meta)
+        cams_by_stem = {
+            str(cam.get("stem")): cam for cam in aligned_cams
+        }
+        for local_i, global_i in enumerate(indices):
+            center, bbox_min, bbox_max, source, num_points = (
+                footprint_from_aligned_prediction(
+                    point_map=aligned_maps[local_i],
+                    valid_mask=valid_masks[local_i],
+                    aligned_camera=cams_by_stem.get(stems[local_i]),
+                    sample_stride=int(args.predicted_footprint_sample_stride),
+                    min_points=int(args.predicted_footprint_min_points),
+                    quantile_min=float(args.predicted_footprint_quantile_min),
+                    quantile_max=float(args.predicted_footprint_quantile_max),
+                )
+            )
+            centers[global_i] = center
+            bbox_mins[global_i] = bbox_min
+            bbox_maxs[global_i] = bbox_max
+            sources[global_i] = source
+            point_counts[global_i] = int(num_points)
+
+        del chunk_views_raw, chunk_views, preds, pred_maps, valid_masks
+        del raw_cams, aligned_maps, aligned_cams, rgbs
+
+    invalid = [
+        meta["stems"][i]
+        for i, source in enumerate(sources)
+        if source in {"invalid", "not_processed"}
+    ]
+    if invalid:
+        raise RuntimeError(
+            "Preliminary pass did not produce every footprint: "
+            f"missing={invalid[:8]}, total_missing={len(invalid)}"
+        )
+    counts = {
+        source: int(sources.count(source)) for source in sorted(set(sources))
+    }
+    return {
+        "centers": centers,
+        "bbox_mins": bbox_mins,
+        "bbox_maxs": bbox_maxs,
+        "meta": {
+            "estimation": "sequential",
+            "alignment_mode": align_mode,
+            "coordinate_frame": "input_translation_aligned_world_xy",
+            "preliminary_chunk_sizes": [
+                int(len(chunk["indices"])) for chunk in chunks
+            ],
+            "preliminary_overlap_size": 0,
+            "source_counts": counts,
+            "sources": sources,
+            "point_counts": point_counts,
+            "alignments": alignment_records,
+            "sample_stride": int(args.predicted_footprint_sample_stride),
+            "min_points": int(args.predicted_footprint_min_points),
+            "quantile_min": float(args.predicted_footprint_quantile_min),
+            "quantile_max": float(args.predicted_footprint_quantile_max),
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -2190,6 +2452,7 @@ def main() -> None:
 
     device = resolve_device(args.device)
     stage_timings: Dict[str, float] = {
+        "footprint_estimation": 0.0,
         "chunking": 0.0,
         "model_prediction": 0.0,
         "post_alignment": 0.0,
@@ -2298,7 +2561,6 @@ def main() -> None:
         meta=meta,
         prior_policy=prior_policy,
     )
-
     print(
         "[POLICY] "
         f"family={prior_policy['family']}, "
@@ -2323,6 +2585,54 @@ def main() -> None:
             f"(mode={args.recenter})."
         )
 
+    footprint_source = "auto"
+    if args.footprint_estimation == "sequential":
+        if args.spatial_partition not in {"footprint_tree", "footprint_grid"}:
+            raise ValueError(
+                "--footprint_estimation sequential requires "
+                "--spatial_partition footprint_tree or footprint_grid."
+            )
+        footprint_time_start = time.perf_counter()
+        stage(
+            "Footprint Estimation",
+            "ordered non-overlapping preliminary feed-forward pass",
+        )
+        checkpoint_overrides, checkpoint_override = checkpoint_hydra_overrides(
+            model_name,
+            args.checkpoint,
+        )
+        footprint_model, _ = init_model_from_hydra(
+            model_name=model_name,
+            machine=args.machine,
+            hydra_overrides=(
+                list(args.hydra_override)
+                + checkpoint_overrides
+                + build_prior_overrides(model_name, prior_policy)
+            ),
+            device=device,
+        )
+        load_checkpoint(footprint_model, checkpoint_override)
+        footprint_model.eval()
+        apply_runtime_prior_policy(footprint_model, prior_policy)
+        meta["predicted_footprints"] = estimate_footprints_sequentially(
+            model=footprint_model,
+            model_name=model_name,
+            views=views,
+            meta=meta,
+            prior_policy=prior_policy,
+            device=device,
+            recenter_state=recenter_state,
+            norm_type=norm_type,
+            args=args,
+        )
+        footprint_source = "predicted"
+        del footprint_model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        stage_timings["footprint_estimation"] = float(
+            time.perf_counter() - footprint_time_start
+        )
+
     # ------------------------------------------------------------------
     # 5. Spatial chunking
     # ------------------------------------------------------------------
@@ -2336,6 +2646,7 @@ def main() -> None:
         max_chunks=args.max_chunks,
         pose_grid_size=args.pose_grid_size,
         pose_grid_neighbor_radius=args.pose_grid_neighbor_radius,
+        footprint_source=footprint_source,
         footprint_workers=args.footprint_workers,
         temporal_overlap_ratio=args.temporal_overlap_ratio,
     )
@@ -2372,6 +2683,7 @@ def main() -> None:
             f"depth={int(counts.get('depth', 0))}, "
             f"lookat={int(counts.get('lookat', 0))}, "
             f"center={int(counts.get('center', 0))}"
+            f", predicted={int(counts.get('predicted', 0))}"
         )
 
     save_spatial_chunk_core_footprint_xy_visualization(
@@ -2461,6 +2773,12 @@ def main() -> None:
             "method": model_name,
             "processing_time_seconds": float(total),
             "processing_time_ms": float(total * 1000.0),
+            "footprint_estimation_seconds": float(
+                stage_timings["footprint_estimation"]
+            ),
+            "footprint_estimation_ms": float(
+                stage_timings["footprint_estimation"] * 1000.0
+            ),
             "chunking_seconds": float(stage_timings["chunking"]),
             "chunking_ms": float(stage_timings["chunking"] * 1000.0),
             "model_prediction_seconds": float(stage_timings["model_prediction"]),

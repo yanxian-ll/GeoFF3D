@@ -18,7 +18,7 @@ from geoff3d.spatial_rrd.scene_io import (
 
 
 SPATIAL_PARTITIONS = {"footprint_tree", "footprint_grid", "pose_grid", "temporal"}
-FOOTPRINT_SOURCES = {"auto", "depth", "lookat", "center"}
+FOOTPRINT_SOURCES = {"auto", "depth", "lookat", "center", "predicted"}
 CHUNK_ORDER_STRATEGIES = {
     "spatial_sort",
     "spatial_center_bfs",
@@ -1031,7 +1031,36 @@ def footprint_features_from_meta(
         pose_centers, gt_points
     )
     source_requested = str(footprint_source)
-    counts = {"depth": 0, "lookat": 0, "center": 0}
+    counts = {"depth": 0, "lookat": 0, "center": 0, "predicted": 0}
+    if source_requested == "predicted":
+        predicted = meta.get("predicted_footprints", {})
+        centers = np.asarray(predicted.get("centers", []), dtype=np.float64)
+        bbox_mins = np.asarray(predicted.get("bbox_mins", []), dtype=np.float64)
+        bbox_maxs = np.asarray(predicted.get("bbox_maxs", []), dtype=np.float64)
+        expected_shape = (len(stems), len(axis_indices))
+        if (
+            centers.shape != expected_shape
+            or bbox_mins.shape != expected_shape
+            or bbox_maxs.shape != expected_shape
+            or not np.isfinite(centers).all()
+            or not np.isfinite(bbox_mins).all()
+            or not np.isfinite(bbox_maxs).all()
+        ):
+            raise ValueError(
+                "Predicted footprint arrays are missing or invalid: "
+                f"expected shape {expected_shape}, got centers={centers.shape}, "
+                f"bbox_mins={bbox_mins.shape}, bbox_maxs={bbox_maxs.shape}."
+            )
+        feature_meta = dict(predicted.get("meta", {}))
+        feature_meta.update(
+            {
+                "footprint_source_requested": "predicted",
+                "footprint_source_counts": {"predicted": len(stems)},
+                "footprint_sources": ["predicted"] * len(stems),
+            }
+        )
+        return centers, bbox_mins, bbox_maxs, feature_meta
+
     depth_footprints = {}
     if source_requested in {"auto", "depth"}:
         depth_footprints = _depth_footprints_from_meta(
@@ -1708,6 +1737,7 @@ def build_temporal_chunks(
     min_chunk_size: int = 1,
     max_chunks: int = 0,
     overlap_ratio: float = 0.25,
+    merge_small_tail: bool = False,
 ) -> Tuple[List[Dict[str, object]], Dict[str, object]]:
     """Build chronological sliding-window chunks with adjacent overlap only."""
     num_frames = int(len(meta.get("stems", [])))
@@ -1754,12 +1784,27 @@ def build_temporal_chunks(
             break
         start += step
 
-    if chunks and len(chunks[-1]["core_indices"]) < int(min_chunk_size) and len(chunks) > 1:
-        # Keep the tail rather than dropping frames; temporal ablations require
-        # complete sequence coverage. Record the under-filled tail explicitly.
-        tail_under_min = True
-    else:
-        tail_under_min = False
+    tail_merged_into_previous = False
+    if (
+        bool(merge_small_tail)
+        and len(chunks) > 1
+        and len(chunks[-1]["core_indices"]) < int(min_chunk_size)
+    ):
+        tail = chunks.pop()
+        previous = chunks[-1]
+        previous["indices"] = list(previous["indices"]) + list(tail["indices"])
+        previous["core_indices"] = (
+            list(previous["core_indices"]) + list(tail["core_indices"])
+        )
+        previous["core_local_indices"] = list(range(len(previous["indices"])))
+        previous["merged_tail_size"] = int(len(tail["core_indices"]))
+        tail_merged_into_previous = True
+
+    tail_under_min = bool(
+        chunks
+        and len(chunks[-1]["core_indices"]) < int(min_chunk_size)
+        and len(chunks) > 1
+    )
 
     covered_core = {
         int(index) for chunk in chunks for index in chunk.get("core_indices", [])
@@ -1788,6 +1833,10 @@ def build_temporal_chunks(
         "alignment_topology": "sequential_parent_chain",
         "total_dropped_seam_images": 0,
         "tail_under_min_chunk_size": bool(tail_under_min),
+        "tail_merged_into_previous": bool(tail_merged_into_previous),
+        "effective_max_chunk_size": int(
+            max((len(chunk["indices"]) for chunk in chunks), default=0)
+        ),
         "core_size_stats": {
             "min": int(min(core_sizes, default=0)),
             "max": int(max(core_sizes, default=0)),
@@ -1828,7 +1877,9 @@ def build_spatial_chunks(
             overlap_ratio=temporal_overlap_ratio,
         )
 
-    if axes == "auto":
+    if footprint_source == "predicted":
+        axes = "xy"
+    elif axes == "auto":
         axes = infer_spatial_axes(meta)
         print(f"[INFO] Auto spatial axes: {axes}")
 

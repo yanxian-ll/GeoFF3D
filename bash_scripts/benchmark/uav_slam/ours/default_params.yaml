@@ -25,9 +25,15 @@ params:
     footprint_workers: 4
 
   chunking:
+    spatial_partition: footprint_tree
+    footprint_estimation: gt
     max_chunk_size: 30
     min_chunk_size: 8
     chunk_order: spatial_center_bfs
+    predicted_footprint_sample_stride: 8
+    predicted_footprint_min_points: 32
+    predicted_footprint_quantile_min: 0.02
+    predicted_footprint_quantile_max: 0.98
     chunk_cache_workers: 2
     chunk_cache_max_pending: 4
     chunk_footprint_font_scale: 1.35
@@ -83,7 +89,7 @@ params:
     post_chunk_align_nn_quantile: 0.7
 
   tsdf_mesh:
-    export_tsdf_mesh: 1
+    export_tsdf_mesh: 0
     tsdf_voxel_size: 0.5
     tsdf_sdf_trunc: -1.0
     tsdf_depth_trunc: 1000.0

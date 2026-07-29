@@ -69,6 +69,13 @@ vggt.sh
 vggt_omega.sh
 ```
 
+To avoid GT-depth footprints, set
+`FOOTPRINT_ESTIMATION=sequential` on any method script. A preliminary
+pass sorts the inputs into non-overlapping sequential chunks and merges a tail
+smaller than 8 images into the previous chunk. Its aligned predictions provide
+the footprints for the normal spatial chunking pass. GeoFF3D uses
+`pose_scale_yaw_translation`; Pi3X, VGGT, and VGGT-Omega use `pose_sim3`.
+
 Each script uses its matching training output by default. A custom checkpoint can be supplied with:
 
 ```bash

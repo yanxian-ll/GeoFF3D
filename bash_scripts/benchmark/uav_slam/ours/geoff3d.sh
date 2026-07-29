@@ -3,15 +3,18 @@ set -euo pipefail
 
 METHOD_NAME="geoff3d"
 MODEL="geoff3d"
-# CHECKPOINT="${CHECKPOINT:-experiments/uav_training/geoff3d_stage1_geoff3d_12v_4d_12ipg_2g/checkpoint-last.pth}"
-CHECKPOINT="${CHECKPOINT:-experiments/uav_training/geoff3d_8v_4d_8ipg_2g/checkpoint-best.pth}"
+# CHECKPOINT="${CHECKPOINT:-experiments/uav_training/geoff3d_8v_4d_8ipg_2g/checkpoint-best.pth}"
+CHECKPOINT="${CHECKPOINT:-checkpoints/geoff3d/checkpoint-best.pth}"
 
-
+# The complete GeoFF3D checkpoint already contains the backbone weights.
+# Avoid loading base Pi3X before applying the GeoFF3D checkpoint.
+LOAD_PRETRAINED_WEIGHTS="${LOAD_PRETRAINED_WEIGHTS:-0}"
 
 NORM_TYPE="${NORM_TYPE:-identity}"
 PATCH_SIZE="${PATCH_SIZE:-14}"
 
 MODEL_FAMILY="ours"
+FOOTPRINT_ESTIMATION="${FOOTPRINT_ESTIMATION:-sequential}"
 
 # 还是使用额外对齐，保证鲁棒性
 ALIGN="${ALIGN:-pose_scale_yaw_translation}"

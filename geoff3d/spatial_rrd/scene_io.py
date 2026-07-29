@@ -104,6 +104,14 @@ def contiguous_select(items: Sequence[str], max_count: int) -> List[str]:
     return items[: int(max_count)]
 
 
+def natural_sort_key(value: str) -> Tuple[object, ...]:
+    """Sort frame names numerically, so frame2 precedes frame10."""
+    return tuple(
+        int(token) if token.isdigit() else token.lower()
+        for token in re.split(r"(\d+)", str(value))
+    )
+
+
 def _float_tokens(line: str) -> Optional[List[float]]:
     try:
         vals = [float(x) for x in line.replace(",", " ").split()]
@@ -632,7 +640,7 @@ def build_views_from_scene(
     if not images:
         raise RuntimeError(f"No images found under {images_dir_path}.")
 
-    selected_stems = sorted(images)
+    selected_stems = sorted(images, key=natural_sort_key)
     if frame_glob and frame_glob != "*":
         selected_stems = [
             s for s in selected_stems if fnmatch.fnmatch(s, frame_glob)

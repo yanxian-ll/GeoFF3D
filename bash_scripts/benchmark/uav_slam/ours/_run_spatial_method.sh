@@ -794,9 +794,14 @@ while IFS= read -r scene_entry_b64; do
   cmd_arg CHUNK_CACHE_MAX_PENDING --chunk_cache_max_pending
   cmd_arg CHUNK_ORDER --chunk_order
   cmd_arg SPATIAL_PARTITION --spatial_partition
+  cmd_arg FOOTPRINT_ESTIMATION --footprint_estimation
   cmd_arg POSE_GRID_SIZE --pose_grid_size
   cmd_arg POSE_GRID_NEIGHBOR_RADIUS --pose_grid_neighbor_radius
   cmd_arg TEMPORAL_OVERLAP_RATIO --temporal_overlap_ratio
+  cmd_arg PREDICTED_FOOTPRINT_SAMPLE_STRIDE --predicted_footprint_sample_stride
+  cmd_arg PREDICTED_FOOTPRINT_MIN_POINTS --predicted_footprint_min_points
+  cmd_arg PREDICTED_FOOTPRINT_QUANTILE_MIN --predicted_footprint_quantile_min
+  cmd_arg PREDICTED_FOOTPRINT_QUANTILE_MAX --predicted_footprint_quantile_max
   cmd_arg CHUNK_FOOTPRINT_POINT_SIZE --chunk_footprint_point_size
   cmd_arg CHUNK_FOOTPRINT_BG_POINT_SIZE --chunk_footprint_bg_point_size
   cmd_arg CHUNK_FOOTPRINT_ALPHA --chunk_footprint_alpha

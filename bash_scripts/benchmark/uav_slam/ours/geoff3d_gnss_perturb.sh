@@ -13,6 +13,7 @@ NORM_TYPE="${NORM_TYPE:-identity}"
 PATCH_SIZE="${PATCH_SIZE:-14}"
 
 MODEL_FAMILY="ours"
+FOOTPRINT_ESTIMATION="${FOOTPRINT_ESTIMATION:-sequential}"
 
 ALIGN="${ALIGN:-pose_scale_yaw_translation}"
 RECENTER="${RECENTER:-auto}"
