@@ -1,6 +1,8 @@
 # GeoFF3D
 
-GeoFF3D is a feed-forward 3D reconstruction framework for UAV imagery. It supports camera, depth, translation, and rotation priors, together with spatial chunking for large scenes.
+![GeoFF3D SLRF qualitative results](assets/images/geoff3d_slrf_qualitative_result.png)
+
+GeoFF3D is a scalable feed-forward framework for large-scale UAV 3D reconstruction. It combines coordinate-anchored reconstruction with spatial chunking and hierarchical aggregation, and supports camera, depth, translation, and rotation priors.
 
 ## Installation
 
