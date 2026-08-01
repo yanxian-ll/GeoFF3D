@@ -240,8 +240,8 @@ def estimate_footprints_sequentially(
         with torch.no_grad():
             preds = model(chunk_views)
         _, _, maps, masks, cameras = collect_pred_outputs(
-            preds=preds, rgbs=rgbs, pred_min_depth=args.pred_min_depth,
-            conf_quantile=0.0, stems=stems, collect_point_indices=[],
+            preds=preds, rgbs=rgbs, conf_quantile=0.0,
+            stems=stems, collect_point_indices=[],
         )
         empty_xyz = np.empty((0, 3), np.float32)
         empty_rgb = np.empty((0, 3), np.uint8)

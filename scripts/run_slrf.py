@@ -8,8 +8,8 @@ This is the single main entry point for spatial RRD inference. It:
   3. Initializes a model with automatic prior policy resolution.
   4. Runs each chunk, reusing predicted depth as seam priors.
   5. Applies per-chunk alignment.
-  6. Aggregates core point clouds and outputs overall RRD, chunk artifacts,
-     and eval ply/npz/json.
+  6. Aggregates core point clouds and outputs overall RRD and chunk artifacts.
+  7. Computes aligned pose and point-cloud metrics in the eval directory.
 
 Examples:
     # Hydra-style invocation with auto policies:
@@ -118,6 +118,7 @@ from geoff3d.slrf.chunk_post_align import (
 )
 from geoff3d.slrf.tsdf_mesh import export_tsdf_mesh
 from geoff3d.slrf.bundle_adjustment import run_bundle_adjustment
+from geoff3d.slrf.metrics import compute_aligned_metrics
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="slrf")
@@ -134,6 +135,23 @@ def main(cfg: DictConfig) -> None:
     values["data_norm_type"] = str(model_cfg.data_norm_type)
     values["patch_size"] = int(model_cfg.patch_size)
     args = SimpleNamespace(**values)
+
+    if not args.evaluation_thresholds or any(
+        float(value) <= 0 for value in args.evaluation_thresholds
+    ):
+        raise ValueError("evaluation_thresholds must contain positive distances.")
+    if not args.evaluation_rpe_steps or any(
+        int(value) <= 0 for value in args.evaluation_rpe_steps
+    ):
+        raise ValueError("evaluation_rpe_steps must contain positive frame offsets.")
+    if int(args.evaluation_max_points) <= 0:
+        raise ValueError("evaluation_max_points must be positive.")
+    if int(args.evaluation_max_align_points) <= 0:
+        raise ValueError("evaluation_max_align_points must be positive.")
+    if int(args.evaluation_icp_iterations) <= 0:
+        raise ValueError("evaluation_icp_iterations must be positive.")
+    if not 0.0 < float(args.evaluation_icp_trim_quantile) <= 1.0:
+        raise ValueError("evaluation_icp_trim_quantile must be in (0, 1].")
 
     model_name = str(args.model).lower().strip()
     align_mode = str(args.align).lower().strip()
@@ -730,7 +748,6 @@ def main(cfg: DictConfig) -> None:
                 stems=chunk_stems,
                 chunk_id=chunk_id,
                 conf_quantile=float(args.conf_quantile),
-                pred_min_depth=float(args.pred_min_depth),
                 debug_dir=depth_conf_debug_dir,
             )
             if depth_conf_filter_meta.get("enabled"):
@@ -818,7 +835,6 @@ def main(cfg: DictConfig) -> None:
             collect_pred_outputs(
                 preds=preds,
                 rgbs=chunk_rgbs,
-                pred_min_depth=args.pred_min_depth,
                 conf_quantile=0.0,
                 stems=chunk_stems,
                 collect_point_indices=collect_point_indices,
@@ -1135,7 +1151,6 @@ def main(cfg: DictConfig) -> None:
         camera_axis_radius=0.0,
         max_points_per_view=args.max_points_per_view,
         voxel_size=args.voxel_downsample,
-        point_downsample=bool(args.point_downsample),
         seed=0,
         log_images=False,
         show_world_axes=True,
@@ -1152,9 +1167,34 @@ def main(cfg: DictConfig) -> None:
         compress_eval=False,
         processing_time=processing_time_meta,
         gt_io_workers=args.scene_io_workers,
-        xy_fill_unmasked=bool(args.xy_fill_unmasked),
-        xy_fill_grid_size=float(args.xy_fill_grid_size),
-        xy_fill_max_points_per_chunk=int(args.xy_fill_max_points_per_chunk),
+    )
+
+    stage("Evaluation", "computing aligned pose and point-cloud metrics")
+    eval_dir = output_dir / "eval"
+    metrics = compute_aligned_metrics(
+        eval_dir=eval_dir,
+        meta=meta,
+        thresholds=tuple(float(value) for value in args.evaluation_thresholds),
+        rpe_steps=tuple(int(value) for value in args.evaluation_rpe_steps),
+        max_pred_points_eval=int(args.evaluation_max_points),
+        max_gt_points_eval=int(args.evaluation_max_points),
+        max_gt_points=int(args.evaluation_max_points),
+        max_align_points=int(args.evaluation_max_align_points),
+        icp_iterations=int(args.evaluation_icp_iterations),
+        icp_trim_quantile=float(args.evaluation_icp_trim_quantile),
+        seed=0,
+        gt_io_workers=int(args.scene_io_workers),
+        output_json=eval_dir / "metrics.json",
+        output_csv=eval_dir / "metrics_summary.csv",
+    )
+    pose_metrics = metrics.get("pose", {})
+    point_metrics = metrics.get("point_cloud", {})
+    print(
+        "[METRICS] "
+        f"pose_valid={bool(pose_metrics.get('valid', False))}, "
+        f"pose_matches={int(pose_metrics.get('num_matches', 0))}, "
+        f"points_valid={bool(point_metrics.get('valid', False))}, "
+        f"output={eval_dir}"
     )
 
     # ------------------------------------------------------------------

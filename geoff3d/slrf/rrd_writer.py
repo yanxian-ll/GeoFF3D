@@ -37,6 +37,10 @@ from geoff3d.slrf.chunk_artifacts import (
     save_chunk_footprint_xy_visualization,
 )
 
+XY_FILL_GRID_VOXEL_MULTIPLIER = 5.0
+XY_FILL_MIN_GRID_SIZE = 0.05
+XY_FILL_MAX_POINTS_PER_CHUNK = 50000
+
 
 # ---------------------------------------------------------------------------
 # Rerun compatibility
@@ -979,7 +983,6 @@ def save_spatial_rrd(
     camera_axis_radius: float = 0.0,
     max_points_per_view: int = 250000,
     voxel_size: float = 0.5,
-    point_downsample: bool = True,
     seed: int = 0,
     log_images: bool = False,
     show_world_axes: bool = True,
@@ -996,32 +999,24 @@ def save_spatial_rrd(
     compress_eval: bool = False,
     processing_time: Optional[Dict[str, object]] = None,
     gt_io_workers: int = 0,
-    xy_fill_unmasked: bool = False,
-    xy_fill_grid_size: float = 0.0,
-    xy_fill_max_points_per_chunk: int = 50000,
 ) -> None:
     output_dir = Path(output_path).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     recording_path = output_dir / "result.rrd"
 
     scene_name = sanitize_name(Path(scene_dir).resolve().name)
-    effective_max_points = int(max_points_per_view) if bool(point_downsample) else 0
+    effective_max_points = int(max_points_per_view)
     gt_points, gt_colors = load_gt_points_from_meta(
         meta,
         effective_max_points,
         seed,
         num_workers=gt_io_workers,
     )
-    if bool(point_downsample):
-        gt_points, gt_colors = voxel_downsample(gt_points, gt_colors, voxel_size)
+    gt_points, gt_colors = voxel_downsample(gt_points, gt_colors, voxel_size)
     all_gt_cams = gt_cameras_for_stems(meta, meta["stems"])
-    effective_voxel_size = float(voxel_size) if bool(point_downsample) else 0.0
-
-    if bool(point_downsample):
-        per_chunk_cap = max(1, int(max_points_per_view // max(1, len(chunk_records))))
-        per_chunk_cap = max(per_chunk_cap, 50000)
-    else:
-        per_chunk_cap = 0
+    effective_voxel_size = float(voxel_size)
+    per_chunk_cap = max(1, int(max_points_per_view // max(1, len(chunk_records))))
+    per_chunk_cap = max(per_chunk_cap, 50000)
 
     aggregate_points, aggregate_colors = aggregate_core_points_streaming(
         chunk_records=chunk_records,
@@ -1030,39 +1025,27 @@ def save_spatial_rrd(
         seed=seed + 17,
     )
 
-    xy_fill_meta: Dict[str, object] = {
-        "enabled": False,
-        "reason": "xy_fill_unmasked is disabled",
-    }
-
-    if bool(xy_fill_unmasked):
-        fill_grid_size = float(xy_fill_grid_size)
-        if fill_grid_size <= 0:
-            if effective_voxel_size > 0:
-                fill_grid_size = max(float(effective_voxel_size) * 5.0, 0.05)
-            else:
-                fill_grid_size = 0.05
-
-        fill_points, fill_colors, xy_fill_meta = aggregate_unmasked_xy_fill_points_streaming(
-            chunk_records=chunk_records,
-            base_points=aggregate_points,
-            grid_size=fill_grid_size,
-            max_points_per_chunk=int(xy_fill_max_points_per_chunk),
-            voxel_size=effective_voxel_size,
-            seed=seed + 2027,
-        )
-
-        if fill_points.shape[0] > 0:
-            aggregate_points = np.concatenate([aggregate_points, fill_points], axis=0)
-            aggregate_colors = np.concatenate([aggregate_colors, fill_colors], axis=0)
-
-        print(
-            "[INFO] XY unmasked fill: "
-            f"enabled={bool(xy_fill_unmasked)}, "
-            f"grid={fill_grid_size:.6g}, "
-            f"candidates={int(xy_fill_meta.get('num_candidates', 0))}, "
-            f"added={int(xy_fill_meta.get('num_added', 0))}"
-        )
+    fill_grid_size = max(
+        effective_voxel_size * XY_FILL_GRID_VOXEL_MULTIPLIER,
+        XY_FILL_MIN_GRID_SIZE,
+    )
+    fill_points, fill_colors, xy_fill_meta = aggregate_unmasked_xy_fill_points_streaming(
+        chunk_records=chunk_records,
+        base_points=aggregate_points,
+        grid_size=fill_grid_size,
+        max_points_per_chunk=XY_FILL_MAX_POINTS_PER_CHUNK,
+        voxel_size=effective_voxel_size,
+        seed=seed + 2027,
+    )
+    if fill_points.shape[0] > 0:
+        aggregate_points = np.concatenate([aggregate_points, fill_points], axis=0)
+        aggregate_colors = np.concatenate([aggregate_colors, fill_colors], axis=0)
+    print(
+        "[INFO] XY unmasked fill: "
+        f"grid={fill_grid_size:.6g}, "
+        f"candidates={int(xy_fill_meta.get('num_candidates', 0))}, "
+        f"added={int(xy_fill_meta.get('num_added', 0))}"
+    )
 
     aggregate_points, aggregate_colors = sample_points_and_colors(
         aggregate_points,
@@ -1071,11 +1054,10 @@ def save_spatial_rrd(
         seed + 17,
     )
 
-    if bool(point_downsample):
-        # 再做一次全局 voxel，去掉不同 chunk 边界重复点。
-        aggregate_points, aggregate_colors = voxel_downsample(
-            aggregate_points, aggregate_colors, voxel_size,
-        )
+    # 再做一次全局 voxel，去掉不同 chunk 边界重复点。
+    aggregate_points, aggregate_colors = voxel_downsample(
+        aggregate_points, aggregate_colors, voxel_size,
+    )
 
     pred_root = (
         "pred_spatial_aligned" if align != "none" else "pred_spatial"
@@ -1132,7 +1114,6 @@ def save_spatial_rrd(
                 "effective_max_points_per_view": int(effective_max_points),
                 "voxel_downsample": float(voxel_size),
                 "effective_voxel_downsample": float(effective_voxel_size),
-                "point_downsample": bool(point_downsample),
             },
         },
         compress=compress_eval,
@@ -1250,7 +1231,6 @@ def save_spatial_rrd(
             "effective_max_points_per_view": int(effective_max_points),
             "voxel_downsample": float(voxel_size),
             "effective_voxel_downsample": float(effective_voxel_size),
-            "point_downsample": bool(point_downsample),
             "note": (
                 "Seam overlaps are selected automatically from connected "
                 "neighboring cells and capped by max_chunk_size."

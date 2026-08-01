@@ -9,6 +9,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import torch
 
+PRED_MIN_DEPTH = 1.0e-6
+
 def _pred_tensor_hw_map(
     tensor: Optional[torch.Tensor],
     *,
@@ -208,7 +210,6 @@ def apply_depth_confidence_filter_to_preds(
     stems: Sequence[str],
     chunk_id: int,
     conf_quantile: float,
-    pred_min_depth: float,
     debug_dir: Optional[Path] = None,
 ) -> Tuple[Dict[str, object], List[Optional[np.ndarray]]]:
     q = float(conf_quantile)
@@ -271,7 +272,7 @@ def apply_depth_confidence_filter_to_preds(
             torch.isfinite(conf)
             & torch.isfinite(pts_cam).all(dim=-1)
             & torch.isfinite(depth_before_t)
-            & (depth_before_t > float(pred_min_depth))
+            & (depth_before_t > PRED_MIN_DEPTH)
         )
 
         num_valid = int(valid.sum().item())
@@ -338,6 +339,5 @@ def apply_depth_confidence_filter_to_preds(
         "per_view": per_view,
         "note": "confidence filtering is stored as masks; original predicted depth/points are preserved",
     }, keep_masks
-
 
 

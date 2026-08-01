@@ -3,11 +3,13 @@ defaults:
   - model: geoff3d
   - _self_
 
+
 scene_dir: ???
 # Output directory. The Rerun recording is saved as output_path/result.rrd.
 output_path: ???
 checkpoint: ???
 device: auto
+
 
 # Scene input
 num_views: 0
@@ -17,17 +19,6 @@ max_image_size: 518
 scene_io_workers: 0
 footprint_workers: 0
 
-# Prediction filtering
-pred_min_depth: 1.0e-6
-conf_quantile: 0.25
-depth_conf_filter: true
-debug_depth_conf_filter: false
-max_points_per_view: 250000
-voxel_downsample: 0.05
-point_downsample: true
-xy_fill_unmasked: false
-xy_fill_grid_size: 0.0
-xy_fill_max_points_per_chunk: 50000
 
 # Spatial chunking
 # choices: footprint_tree, temporal
@@ -35,7 +26,6 @@ spatial_partition: footprint_tree
 # prior: compute footprints from matching cams/*.txt and metric depth/*.exr.
 # sequential: estimate footprints with a preliminary ordered model pass.
 footprint_estimation: sequential
-
 max_chunk_size: 32
 min_chunk_size: 8
 max_chunks: 0
@@ -43,6 +33,7 @@ temporal_overlap_ratio: 0.25
 # choices: spatial_center_bfs, sequential
 # Only used by footprint_tree; temporal always uses sequential order.
 chunk_order: spatial_center_bfs
+
 
 # Prior and alignment policy
 # Pi3X only. choices: input, none
@@ -61,6 +52,7 @@ depth_prior: pred
 # Pi3X, Pi3, VGGT, and VGGT-Omega only support: sim3
 align: sim3
 
+
 # Chunk post-alignment
 post_chunk_align: true
 # choices:
@@ -77,6 +69,17 @@ post_chunk_align_workers: 2
 compute_seam_error: true
 seam_error_max_points_per_edge: 20000
 
+
+# Aligned reconstruction evaluation (runs automatically after reconstruction).
+# Distance thresholds are in meters; RPE steps are frame offsets.
+evaluation_thresholds: [0.5, 1.0, 2.0, 5.0]
+evaluation_rpe_steps: [1, 5, 10]
+evaluation_max_points: 300000
+evaluation_max_align_points: 100000
+evaluation_icp_iterations: 8
+evaluation_icp_trim_quantile: 0.7
+
+
 # Pose perturbation
 pose_perturb: true
 pose_perturb_xy_std: 0.5
@@ -86,6 +89,15 @@ pose_perturb_xy_max: 2.0
 pose_perturb_z_max: 2.0
 pose_perturb_yaw_max_deg: 3.0
 pose_perturb_seed_offset: 930001
+
+
+# Prediction filtering
+depth_conf_filter: true
+conf_quantile: 0.25
+debug_depth_conf_filter: false
+max_points_per_view: 250000
+voxel_downsample: 0.05
+
 
 # NOTE: The optional mesh/refinement modules have not been optimized and
 # still require further optimization.

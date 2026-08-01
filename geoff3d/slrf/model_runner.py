@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 import hydra
 import numpy as np
 import torch
+
+PRED_MIN_DEPTH = 1.0e-6
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
@@ -557,7 +559,6 @@ def pred_pose_to_c2w(
 def collect_pred_outputs(
     preds: List[Dict[str, torch.Tensor]],
     rgbs: Sequence[np.ndarray],
-    pred_min_depth: float = 1e-6,
     conf_quantile: float = 0.0,
     stems: Optional[Sequence[str]] = None,
     collect_point_indices: Optional[Sequence[int]] = None,
@@ -606,7 +607,7 @@ def collect_pred_outputs(
             pts_cam = torch_to_np(pred["pts3d_cam"][0], dtype=np.float32)
             if pts_cam.shape[:2] == finite.shape:
                 finite &= np.isfinite(pts_cam).all(axis=-1)
-                finite &= pts_cam[..., 2] > float(pred_min_depth)
+                finite &= pts_cam[..., 2] > PRED_MIN_DEPTH
 
         if "conf" in pred and conf_quantile > 0:
             conf = torch_to_np(pred["conf"][0], dtype=np.float32)
