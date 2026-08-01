@@ -19,8 +19,8 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
-from geoff3d.spatial_rrd.chunk_cache import get_cached_sequence
-from geoff3d.spatial_rrd.chunk_transform import (
+from geoff3d.slrf.chunk_cache import get_cached_sequence
+from geoff3d.slrf.chunk_transform import (
     get_transformed_cached_point_maps,
     get_transformed_cameras,
 )

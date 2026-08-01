@@ -1,0 +1,118 @@
+defaults:
+  - machine: aws
+  - model: geoff3d
+  - _self_
+
+scene_dir: ???
+# Output directory. The Rerun recording is saved as output_path/result.rrd.
+output_path: ???
+checkpoint: ???
+device: auto
+
+# Scene input
+num_views: 0
+start: 0
+stride: 1
+max_image_size: 518
+scene_io_workers: 0
+footprint_workers: 0
+
+# Prediction filtering
+pred_min_depth: 1.0e-6
+conf_quantile: 0.25
+depth_conf_filter: true
+debug_depth_conf_filter: false
+max_points_per_view: 250000
+voxel_downsample: 0.05
+point_downsample: true
+xy_fill_unmasked: false
+xy_fill_grid_size: 0.0
+xy_fill_max_points_per_chunk: 50000
+
+# Spatial chunking
+# choices: footprint_tree, temporal
+spatial_partition: footprint_tree
+# prior: compute footprints from matching cams/*.txt and metric depth/*.exr.
+# sequential: estimate footprints with a preliminary ordered model pass.
+footprint_estimation: sequential
+
+max_chunk_size: 32
+min_chunk_size: 8
+max_chunks: 0
+temporal_overlap_ratio: 0.25
+# choices: spatial_center_bfs, sequential
+# Only used by footprint_tree; temporal always uses sequential order.
+chunk_order: spatial_center_bfs
+
+# Prior and alignment policy
+# Pi3X only. choices: input, none
+pose_prior: input
+# GeoFF3D only. Required value: input
+translation_prior: input
+# GeoFF3D only. choices: input, none
+rotation_prior: input
+# GeoFF3D and Pi3X. choices: input, pred, none
+ray_prior: pred
+# pred: use model-predicted seam depth; none: disable the depth prior.
+# Only input requires a depth/ directory for the depth-prior path.
+depth_prior: pred
+# GeoFF3D choices: none, scale, translation, scale_translation,
+#                    scale_yaw_translation, yaw_translation, sim3
+# Pi3X, Pi3, VGGT, and VGGT-Omega only support: sim3
+align: sim3
+
+# Chunk post-alignment
+post_chunk_align: true
+# choices:
+#   translation: XYZ translation only.
+#   yaw_translation: Z-axis yaw rotation and XYZ translation.
+#   rigid: full 3D rotation and XYZ translation, without scale estimation.
+#   sim3: scale, full 3D rotation, and XYZ translation.
+post_chunk_align_mode: rigid
+post_chunk_align_min_corr: 512
+post_chunk_align_max_corr_per_view: 4096
+post_chunk_align_max_corr: 50000
+post_chunk_align_spatial_balance: true
+post_chunk_align_workers: 2
+compute_seam_error: true
+seam_error_max_points_per_edge: 20000
+
+# Pose perturbation
+pose_perturb: true
+pose_perturb_xy_std: 0.5
+pose_perturb_z_std: 0.8
+pose_perturb_yaw_std_deg: 1.0
+pose_perturb_xy_max: 2.0
+pose_perturb_z_max: 2.0
+pose_perturb_yaw_max_deg: 3.0
+pose_perturb_seed_offset: 930001
+
+# NOTE: The optional mesh/refinement modules have not been optimized and
+# still require further optimization.
+# TSDF mesh export. voxel_size is in meters and only applies when enabled.
+export_tsdf_mesh: false
+tsdf_voxel_size: 0.05
+
+# Global bundle adjustment with fixed matching and solver settings.
+bundle_adjustment: false
+
+# 3D Gaussian refinement. steps controls optimization time;
+# max_gaussians limits GPU memory usage.
+gsplat_refine: false
+gsplat_steps: 7000
+gsplat_max_gaussians: 300000
+
+# NOTE: The orthophoto/DSM module has not been optimized and still requires
+# further optimization.
+# Orthophoto/DSM rendering. gsd is meters per pixel; 0 selects it automatically.
+# epsg=0 writes a local-coordinate raster without CRS metadata.
+render_dom: false
+dom_gsd: 0.0
+dom_epsg: 0
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: .
+  output_subdir: null

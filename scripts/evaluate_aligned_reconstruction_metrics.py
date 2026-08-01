@@ -23,13 +23,13 @@ from typing import Dict, Sequence
 
 import torch
 
-from geoff3d.spatial_rrd.metrics import (
+from geoff3d.slrf.metrics import (
     compute_aligned_metrics,
     load_eval_outputs,
     parse_float_list,
     parse_int_list,
 )
-from geoff3d.spatial_rrd.scene_io import build_views_from_scene
+from geoff3d.slrf.scene_io import build_views_from_scene
 
 
 def restrict_meta_to_stems(meta: Dict[str, object], stems: Sequence[str]) -> Dict[str, object]:
@@ -66,16 +66,11 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--images_dir", default="images")
     parser.add_argument("--cams_dir", default="cams")
     parser.add_argument("--depth_dir", default="depth")
-    parser.add_argument("--frame_glob", default="*")
     parser.add_argument("--num_views", type=int, default=0)
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--stride", type=int, default=1)
-    parser.add_argument("--max_side", type=int, default=518)
-    parser.add_argument("--size_multiple", type=int, default=14)
-
-    parser.add_argument("--depth_scale", type=float, default=1.0)
-    parser.add_argument("--depth_min", type=float, default=1e-6)
-    parser.add_argument("--depth_max", type=float, default=1e6)
+    parser.add_argument("--max_image_size", type=int, default=518)
+    parser.add_argument("--patch_size", type=int, default=14)
 
     parser.add_argument("--thresholds", default="0.5,1.0,2.0,5.0")
     parser.add_argument("--rpe_steps", default="1,5,10")
@@ -112,15 +107,11 @@ def main(argv=None) -> int:
         images_dir=args.images_dir,
         cams_dir=args.cams_dir,
         depth_dir=args.depth_dir,
-        frame_glob=args.frame_glob,
         num_views=args.num_views,
         start=args.start,
         stride=args.stride,
-        max_side=args.max_side,
-        size_multiple=args.size_multiple,
-        depth_scale=args.depth_scale,
-        depth_min=args.depth_min,
-        depth_max=args.depth_max,
+        max_image_size=args.max_image_size,
+        patch_size=args.patch_size,
         device=torch.device("cpu"),
         show_progress=not bool(args.no_progress),
     )

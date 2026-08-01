@@ -7,11 +7,6 @@ defaults:
 lr: 1e-05
 min_lr: 1e-07
 
-# VGGT-Omega uses patch_size=16. Keep dataset/inference preprocessing aligned
-# with this because the wrapper only validates H/W and does not resize or pad.
-# Override from CLI if the selected dataset config already controls this.
-size_multiple: 16
-
 # Optimizer parameters specific to submodules.
 submodule_configs:
   # DINOv2 / VGGT-Omega image patch embedding. Use a much smaller LR for the

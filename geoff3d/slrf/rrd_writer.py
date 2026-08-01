@@ -17,22 +17,22 @@ try:
 except Exception:
     rrb = None
 
-from geoff3d.spatial_rrd.scene_io import (
+from geoff3d.slrf.scene_io import (
     load_gt_points_from_meta,
     sanitize_name,
     sample_points_and_colors,
     voxel_downsample,
 )
-from geoff3d.spatial_rrd.chunk_cache import (
+from geoff3d.slrf.chunk_cache import (
     get_cached_colors,
     get_cached_sequence,
 )
-from geoff3d.spatial_rrd.chunk_transform import (
+from geoff3d.slrf.chunk_transform import (
     get_transformed_cached_points,
     get_transformed_cached_point_maps,
     get_transformed_cameras,
 )
-from geoff3d.spatial_rrd.chunk_artifacts import (
+from geoff3d.slrf.chunk_artifacts import (
     make_chunk_color_lookup,
     save_chunk_footprint_xy_visualization,
 )
@@ -655,7 +655,7 @@ def gt_cameras_for_stems(
 def input_pose_centers_by_stem(
     meta: Dict[str, object],
 ) -> Dict[str, np.ndarray]:
-    from geoff3d.spatial_rrd.geometry_align import camera_centers_by_stem
+    from geoff3d.slrf.geometry_align import camera_centers_by_stem
 
     cams = meta.get("cams", {})
     out = []
@@ -963,7 +963,7 @@ def save_chunk_point_cloud_artifacts(
 
 
 def save_spatial_rrd(
-    output_rrd: Path,
+    output_path: Path,
     scene_dir: str,
     model_name: str,
     checkpoint: Optional[str],
@@ -1000,8 +1000,9 @@ def save_spatial_rrd(
     xy_fill_grid_size: float = 0.0,
     xy_fill_max_points_per_chunk: int = 50000,
 ) -> None:
-    output_rrd = Path(output_rrd).expanduser().resolve()
-    output_rrd.parent.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(output_path).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    recording_path = output_dir / "result.rrd"
 
     scene_name = sanitize_name(Path(scene_dir).resolve().name)
     effective_max_points = int(max_points_per_view) if bool(point_downsample) else 0
@@ -1094,7 +1095,7 @@ def save_spatial_rrd(
     )
 
     save_final_eval_outputs(
-        eval_dir=output_rrd.with_suffix("") / "eval",
+        eval_dir=output_dir / "eval",
         pred_cams=all_pred_cams,
         gt_cams=all_gt_cams,
         pred_points=aggregate_points,
@@ -1103,7 +1104,7 @@ def save_spatial_rrd(
         gt_colors=gt_colors,
         meta={
             "schema": "final_eval_v1",
-            "script": "scripts/predict_scene_to_rrd_spatial.py",
+            "script": "scripts/run_slrf.py",
             "scene_dir": str(Path(scene_dir).expanduser().resolve()),
             "method": model_name,
             "checkpoint": checkpoint,
@@ -1144,7 +1145,7 @@ def save_spatial_rrd(
     rr_init_save_compat(
         "predict_scene_to_rrd_spatial_overall",
         overall_recording_id,
-        output_rrd,
+        recording_path,
     )
     rr_set_time_compat("frame", 0)
     log_view_coordinates(view_coordinates)
@@ -1192,13 +1193,13 @@ def save_spatial_rrd(
         )
 
     rr_disconnect_compat()
-    print(f"Saved overall Rerun recording: {output_rrd}")
+    print(f"Saved overall Rerun recording: {recording_path}")
 
     chunk_artifacts_dir: Optional[Path] = None
     chunk_point_artifacts: List[Dict[str, object]] = []
     chunk_footprint_path: Optional[Path] = None
     if log_chunks_rrd:
-        chunk_artifacts_dir = output_rrd.with_suffix("") / "chunk_outputs"
+        chunk_artifacts_dir = output_dir / "chunk_outputs"
         rgba_by_chunk_id, rgb_by_chunk_id = make_chunk_color_lookup(chunk_records)
         chunk_footprint_path = save_chunk_footprint_xy_visualization(
             meta=meta,
@@ -1223,16 +1224,17 @@ def save_spatial_rrd(
             record["num_chunk_pred_points_logged"] = 0
         print("[INFO] Skip chunk artifacts because log_chunks_rrd=False.")
 
-    sidecar = output_rrd.with_suffix(".json")
+    sidecar = output_dir / "result.json"
     payload = {
         "scene_dir": str(Path(scene_dir).resolve()),
         "model": model_name,
         "checkpoint": checkpoint,
-        "output_rrd": str(output_rrd),
+        "output_path": str(output_dir),
+        "rrd_path": str(recording_path),
         "chunk_artifacts_dir": str(chunk_artifacts_dir) if chunk_artifacts_dir is not None else None,
         "chunk_footprint_path": str(chunk_footprint_path) if chunk_footprint_path is not None else None,
         "chunk_point_artifacts": chunk_point_artifacts,
-        "chunk_cache_dir": str(output_rrd.with_suffix("") / "chunk_cache"),
+        "chunk_cache_dir": str(output_dir / "chunk_cache"),
         "stems": list(meta["stems"]),
         "target_size": {
             "height": int(meta["target_h"]),

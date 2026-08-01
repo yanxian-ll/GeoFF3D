@@ -13,8 +13,8 @@ from typing import Dict, List, Mapping, Sequence, Tuple
 
 import numpy as np
 
-from geoff3d.spatial_rrd.chunk_cache import get_cached_points, get_cached_sequence
-from geoff3d.spatial_rrd.geometry_align import (
+from geoff3d.slrf.chunk_cache import get_cached_points, get_cached_sequence
+from geoff3d.slrf.geometry_align import (
     apply_similarity_to_cameras,
     apply_similarity_to_point_maps,
     apply_similarity_to_points,

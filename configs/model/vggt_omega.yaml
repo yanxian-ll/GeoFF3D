@@ -1,5 +1,6 @@
 # String for model factory
 model_str: "vggt_omega"
+patch_size: 16
 
 # Model config
 model_config:
@@ -19,7 +20,7 @@ model_config:
   custom_ckpt_path: null
 
   # Upstream VGGT-Omega-1B defaults.
-  patch_size: 16
+  patch_size: ${model.patch_size}
   embed_dim: 1024
   enable_camera: true
   enable_depth: true

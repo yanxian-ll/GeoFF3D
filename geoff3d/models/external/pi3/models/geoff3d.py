@@ -69,26 +69,6 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
         ckpt=None,
         gradient_checkpointing=False,
         checkpoint_strategy="all",
-        use_world_translation_prior=True,
-        translation_normalization="scale",
-        depth_prior_normalization="world_translation",
-        de_normalize_outputs=False,
-        translation_encoder_hidden_dim=256,
-        zero_init_translation_encoder=True,
-        translation_encoder_input_layer_norm=False,
-        min_translation_prior_views=3,
-        use_world_rotation_prior=False,
-        rotation_encoder_hidden_dim=256,
-        zero_init_rotation_encoder=True,
-        rotation_encoder_input_layer_norm=False,
-        min_rotation_prior_views=3,
-        force_rotation_prior_for_degenerate_translation=True,
-        translation_collinearity_threshold=0.05,
-        translation_degenerate_baseline_eps=1e-6,
-        default_world_translation_prob=1.0,
-        default_world_rotation_prob=1.0,
-        translation_prior_prob: Optional[float] = None,
-        rotation_prior_prob: Optional[float] = None,
         **kwargs,
     ):
         super().__init__()
@@ -213,37 +193,19 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
         self.register_buffer("image_mean", image_mean)
         self.register_buffer("image_std", image_std)
 
-        if depth_prior_normalization not in {"world_translation", "mean_aug"}:
-            raise ValueError(
-                "depth_prior_normalization must be one of "
-                "{'world_translation', 'mean_aug'}, got "
-                f"{depth_prior_normalization!r}."
-            )
-        self.depth_prior_normalization = depth_prior_normalization
-        self.use_world_translation_prior = bool(use_world_translation_prior)
-        self.translation_normalization = translation_normalization
-        self.de_normalize_outputs = bool(de_normalize_outputs)
-        self.min_translation_prior_views = int(min_translation_prior_views)
-        self.use_world_rotation_prior = bool(use_world_rotation_prior)
-        self.min_rotation_prior_views = int(min_rotation_prior_views)
-        self.force_rotation_prior_for_degenerate_translation = bool(force_rotation_prior_for_degenerate_translation)
-        self.translation_collinearity_threshold = float(translation_collinearity_threshold)
-        self.translation_degenerate_baseline_eps = float(translation_degenerate_baseline_eps)
-        self.default_world_translation_prob = float(default_world_translation_prob if translation_prior_prob is None else translation_prior_prob)
-        self.default_world_rotation_prob = float(default_world_rotation_prob if rotation_prior_prob is None else rotation_prior_prob)
         self.world_translation_encoder = WorldTranslationEncoder(
             3,
-            translation_encoder_hidden_dim,
+            256,
             self.dec_embed_dim,
-            zero_init_translation_encoder,
-            translation_encoder_input_layer_norm,
+            True,
+            False,
         )
         self.world_rotation_encoder = WorldRotationEncoder(
             6,
-            rotation_encoder_hidden_dim,
+            256,
             self.dec_embed_dim,
-            zero_init_rotation_encoder,
-            rotation_encoder_input_layer_norm,
+            True,
+            False,
         )
 
     def wrap_module_with_gradient_checkpointing(self, module: nn.Module):
@@ -263,22 +225,27 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
             raise ValueError(f"{name} must be in [0, 1]")
         return value
 
-    def _resolve_probs(self, with_prior, overall_prob, ray_dirs_prob, depth_prob, world_translation_prob, world_rotation_prob, device):
-        if with_prior is False or torch.rand(1, device=device) >= self._prob("overall_prob", overall_prob):
-            return 0.0, 0.0, 0.0, 0.0
+    def _resolve_probs(self, ray_dirs_prob, depth_prob, world_translation_prob, world_rotation_prob):
         return (
             self._prob("ray_dirs_prob", ray_dirs_prob),
             self._prob("depth_prob", depth_prob),
-            self._prob("world_translation_prob", self.default_world_translation_prob if world_translation_prob is None else world_translation_prob),
-            self._prob("world_rotation_prob", self.default_world_rotation_prob if world_rotation_prob is None else world_rotation_prob),
+            self._prob("world_translation_prob", 0.0 if world_translation_prob is None else world_translation_prob),
+            self._prob("world_rotation_prob", 0.0 if world_rotation_prob is None else world_rotation_prob),
         )
 
     def _sample_mask(self, B, N, device, prob, name, min_views=0, mask=None):
-        if mask is not None:
+        prob = self._prob(name.replace("_mask", "_prob"), prob)
+        if not self.training:
+            if mask is None:
+                return torch.full(
+                    (B, N), prob > 0.0, device=device, dtype=torch.bool
+                )
             if mask.shape != (B, N):
                 raise ValueError(f"{name} must have shape [B, N]")
             return mask.to(device=device, dtype=torch.bool)
-        prob = self._prob(name.replace("_mask", "_prob"), prob)
+
+        # Training masks are sampled exclusively from task probabilities.
+        # Explicit input masks are reserved for inference.
         if prob <= 0.0:
             return torch.zeros(B, N, device=device, dtype=torch.bool)
         if (not self.training) or prob >= 1.0:
@@ -298,77 +265,13 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
     def _rot6d(R):
         return R[..., :3, :2].transpose(-1, -2).reshape(*R.shape[:-2], 6)
 
-    def _translation_degenerate_mask(self, world_translations, translation_mask):
-        """Return per-sample training mask where translation anchors are ambiguous.
-
-        Degenerate cases: effective translation prior count <= 2, nearly zero
-        baseline, or valid camera centers are close to a line. Collinearity is
-        measured by the second singular value relative to the first singular
-        value of centered valid translation centers.
-        """
-        B, N = world_translations.shape[:2]
-        device = world_translations.device
-        if translation_mask is None:
-            translation_mask = torch.ones(B, N, device=device, dtype=torch.bool)
-        else:
-            translation_mask = translation_mask.to(device=device, dtype=torch.bool)
-
-        counts = translation_mask.sum(dim=1)
-        degenerate = counts <= 2
-        if N < 2:
-            return torch.ones(B, device=device, dtype=torch.bool)
-
-        valid = translation_mask.to(device=device, dtype=torch.float32).unsqueeze(-1)
-        count_f = valid.sum(dim=1, keepdim=True).clamp_min(1.0)
-        t = world_translations.to(device=device, dtype=torch.float32)
-        center = (t * valid).sum(dim=1, keepdim=True) / count_f
-        centered = (t - center) * valid
-        svals = torch.linalg.svdvals(centered)
-        first = svals[:, 0]
-        if svals.shape[-1] >= 2:
-            second = svals[:, 1]
-        else:
-            second = torch.zeros_like(first)
-        near_zero_baseline = first <= self.translation_degenerate_baseline_eps
-        nearly_collinear = second <= (self.translation_collinearity_threshold * first.clamp_min(self.translation_degenerate_baseline_eps))
-        degenerate = degenerate | ((counts >= 3) & (near_zero_baseline | nearly_collinear))
-        return degenerate
-
-    def _force_one_rotation_for_degenerate_translation(self, rotation_mask, degenerate_translation_mask):
-        if (
-            (not self.training)
-            or degenerate_translation_mask is None
-            or not bool(degenerate_translation_mask.any())
-        ):
-            return rotation_mask
-        rotation_mask = rotation_mask.clone()
-        needs_rotation = degenerate_translation_mask & (~rotation_mask.any(dim=1))
-        if not bool(needs_rotation.any()):
-            return rotation_mask
-        rows = torch.nonzero(needs_rotation, as_tuple=False).flatten()
-        cols = torch.randint(0, rotation_mask.shape[1], (rows.numel(),), device=rotation_mask.device)
-        rotation_mask[rows, cols] = True
-        return rotation_mask
-
     def _norm_t(self, t, mask=None, eps=1e-6):
         t = t.float()
         B, N = t.shape[:2]
         valid = torch.ones(B, N, 1, device=t.device, dtype=t.dtype) if mask is None else mask.to(t.device, t.dtype).unsqueeze(-1)
         count = valid.sum(1, keepdim=True).clamp_min(1.0)
         one = torch.ones(B, 1, 1, device=t.device, dtype=t.dtype)
-        if self.translation_normalization == "none":
-            return t * valid, torch.zeros_like(t[:, :1]), one
-        if self.translation_normalization == "scale":
-            center = torch.zeros_like(t[:, :1])
-            scale = (t.norm(dim=-1, keepdim=True) * valid).sum(1, keepdim=True) / count
-            scale = torch.where(scale > eps, scale, one)
-            return (t / scale) * valid, center, scale
-        if self.translation_normalization == "mean":
-            center = (t * valid).sum(1, keepdim=True) / count
-        elif self.translation_normalization == "first_view":
-            center = t[:, :1]
-        else:
-            raise ValueError(f"unknown translation_normalization: {self.translation_normalization}")
+        center = (t * valid).sum(1, keepdim=True) / count
         d = t - center
         scale = (d.norm(dim=-1, keepdim=True) * valid).sum(1, keepdim=True) / count
         scale = torch.where(scale > eps, scale, one)
@@ -377,8 +280,7 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
     def _translation_scale_for_depth(self, world_translations: Optional[torch.Tensor], B: int, device: torch.device, mask=None) -> torch.Tensor:
         if world_translations is None:
             raise ValueError(
-                "depth_prior_normalization='world_translation' requires "
-                "world_translations with shape [B, N, 3]."
+                "Depth priors require world_translations with shape [B, N, 3]."
             )
         _, _, scale = self._norm_t(world_translations.to(device), mask=mask)
         return scale.view(B, 1, 1, 1).clamp_min(1e-8)
@@ -403,18 +305,9 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
             return torch.zeros_like(hidden)
         depths = depths.to(hidden.device)
         with torch.amp.autocast(device_type="cuda", enabled=False):
-            if self.depth_prior_normalization == "mean_aug":
-                d, _ = self.normalize_depth(depths, method="mean")
-                if self.training:
-                    d = d / (0.8 + torch.rand(B, device=hidden.device) * 0.4).view(B, 1, 1, 1)
-            elif self.depth_prior_normalization == "world_translation":
-                if depth_scale is None:
-                    raise ValueError(
-                        "depth_prior_normalization='world_translation' requires depth_scale."
-                    )
-                d = depths.float() / depth_scale.to(device=hidden.device, dtype=torch.float32)
-            else:
-                raise ValueError(f"Unknown depth_prior_normalization: {self.depth_prior_normalization!r}")
+            if depth_scale is None:
+                raise ValueError("Depth priors require a world-translation depth scale.")
+            d = depths.float() / depth_scale.to(device=hidden.device, dtype=torch.float32)
             valid = (depths > 0).float().reshape(B * N, 1, H, W)
             d = d.reshape(B * N, 1, H, W)
         emb = self.depth_encoder(torch.cat([d, valid], 1), is_training=True)["x_norm_patchtokens"] + self.depth_emb
@@ -446,33 +339,28 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
         depth_mask=None,
         intrinsics=None,
         rays=None,
+        ray_dirs_mask=None,
         poses=None,
         world_translations=None,
         world_translation_mask=None,
         world_rotations=None,
         world_rotation_mask=None,
-        with_prior=None,
-        overall_prob=1.0,
         ray_dirs_prob=0.0,
         depth_prob=0.0,
         world_translation_prob=None,
         world_rotation_prob=None,
         cam_prob=0.0,
         return_gs_features=False,
-        return_scene_normalization=False,
     ):
         imgs = (imgs - self.image_mean) / self.image_std
         B, N, _, H, W = imgs.shape
         device = imgs.device
         patch_h, patch_w = H // self.patch_size, W // self.patch_size
         p_ray, p_depth, p_t, p_r = self._resolve_probs(
-            with_prior,
-            overall_prob,
             ray_dirs_prob,
             depth_prob,
             world_translation_prob,
             world_rotation_prob,
-            device,
         )
 
         if world_translations is None and poses is not None:
@@ -484,36 +372,28 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
         t_mask = None
         norm_t = None
         depth_scale = None
-        degenerate_translation_mask = None
 
         # Compute world-translation normalization first. The resulting `scale`
         # is the single source of truth for both translation prior embedding and
         # depth-prior normalization.
-        need_translation_scale = p_depth > 0.0 and self.depth_prior_normalization == "world_translation"
-        if self.use_world_translation_prior and p_t > 0.0:
+        need_translation_scale = p_depth > 0.0
+        if p_t > 0.0:
             if world_translations is None or world_translations.shape[:2] != (B, N) or world_translations.shape[-1] != 3:
                 raise ValueError("world_translations must have shape [B, N, 3]")
-            t_mask = self._sample_mask(B, N, device, p_t, "world_translation_mask", self.min_translation_prior_views, world_translation_mask)
+            t_mask = self._sample_mask(B, N, device, p_t, "world_translation_mask", 3, world_translation_mask)
             norm_t, center, scale = self._norm_t(world_translations.to(device), t_mask)
             depth_scale = scale.view(B, 1, 1, 1).clamp_min(1e-8)
-            if self.training and self.force_rotation_prior_for_degenerate_translation:
-                degenerate_translation_mask = self._translation_degenerate_mask(world_translations.to(device), t_mask)
         elif need_translation_scale:
             depth_scale = self._translation_scale_for_depth(world_translations, B=B, device=device, mask=world_translation_mask)
 
         output_norm_center = center
         output_norm_scale = scale
-        if return_scene_normalization and (center is None or scale is None):
-            if world_translations is None or world_translations.shape[:2] != (B, N) or world_translations.shape[-1] != 3:
-                raise ValueError(
-                    "return_scene_normalization=True requires world_translations "
-                    "with shape [B, N, 3]."
-                )
-            _, center, scale = self._norm_t(world_translations.to(device), world_translation_mask)
-
         # encode image and dense priors
         hidden = self.encoder(imgs.reshape(B * N, 3, H, W), is_training=True)["x_norm_patchtokens"]
-        ray_emb = self._ray_emb(hidden, B, N, H, W, rays, intrinsics, self._sample_mask(B, N, device, p_ray, "ray_dirs_mask"))
+        ray_emb = self._ray_emb(
+            hidden, B, N, H, W, rays, intrinsics,
+            self._sample_mask(B, N, device, p_ray, "ray_dirs_mask", mask=ray_dirs_mask),
+        )
         depth_emb = self._depth_emb(
             hidden,
             B,
@@ -527,25 +407,16 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
         hidden = hidden + ray_emb + depth_emb
         hidden = hidden.reshape(B, N, -1, self.dec_embed_dim)
 
-        # encode translation & rotation. Translation uses the same `scale` that
-        # was already used for depth_emb when depth_prior_normalization is
-        # 'world_translation'.
-        if self.use_world_translation_prior and p_t > 0.0:
+        # Encode translation and rotation. Translation and depth priors share
+        # the same world-translation scale.
+        if p_t > 0.0:
             t_emb = self.world_translation_encoder(norm_t).to(hidden.dtype) * t_mask.to(device, hidden.dtype)[:, :, None]
             hidden = hidden + t_emb[:, :, None, :]
 
-        force_rotation_prior = (
-            self.training
-            and self.force_rotation_prior_for_degenerate_translation
-            and degenerate_translation_mask is not None
-            and bool(degenerate_translation_mask.any())
-        )
-        use_rotation_prior_now = self.use_world_rotation_prior and (p_r > 0.0 or force_rotation_prior)
-        if use_rotation_prior_now:
+        if p_r > 0.0:
             if world_rotations is None or world_rotations.shape[:2] != (B, N) or world_rotations.shape[-2:] != (3, 3):
                 raise ValueError("world_rotations must have shape [B, N, 3, 3]")
-            r_mask = self._sample_mask(B, N, device, p_r, "world_rotation_mask", self.min_rotation_prior_views, world_rotation_mask)
-            r_mask = self._force_one_rotation_for_degenerate_translation(r_mask, degenerate_translation_mask)
+            r_mask = self._sample_mask(B, N, device, p_r, "world_rotation_mask", 3, world_rotation_mask)
             r6 = self._rot6d(world_rotations.to(device).float()) * r_mask.to(device, torch.float32)[:, :, None]
             r_emb = self.world_rotation_encoder(r6).to(hidden.dtype) * r_mask.to(device, hidden.dtype)[:, :, None]
             hidden = hidden + r_emb[:, :, None, :]
@@ -573,7 +444,7 @@ class GeoFF3D(nn.Module, PyTorchModelHubMixin):
             gs_feature_tokens=gs_feature_tokens,
         )
         # denorm
-        if self.use_world_translation_prior and self.de_normalize_outputs and output_norm_center is not None and output_norm_scale is not None:
+        if output_norm_center is not None and output_norm_scale is not None:
             outputs = self._denorm(outputs, output_norm_center.to(device, outputs["points"].dtype), output_norm_scale.to(device, outputs["points"].dtype), True)
         if center is not None and scale is not None:
             outputs["world_translation_center"] = center

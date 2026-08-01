@@ -26,20 +26,20 @@ import cv2
 import numpy as np
 import torch
 
-from geoff3d.spatial_rrd.chunk_cache import (
+from geoff3d.slrf.chunk_cache import (
     get_cached_colors,
     get_cached_sequence,
 )
-from geoff3d.spatial_rrd.chunk_transform import (
+from geoff3d.slrf.chunk_transform import (
     get_transformed_cached_point_maps,
     get_transformed_cached_points,
     get_transformed_cameras,
 )
-from geoff3d.spatial_rrd.dsm_visualization import (
+from geoff3d.slrf.dsm_visualization import (
     save_dsm_contour_visualization,
     save_dsm_elevation_visualization,
 )
-from geoff3d.spatial_rrd.rrd_writer import load_point_cloud_ply
+from geoff3d.slrf.rrd_writer import load_point_cloud_ply
 
 
 _AXIS_TO_IDX = {"x": 0, "y": 1, "z": 2}

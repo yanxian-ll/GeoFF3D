@@ -30,8 +30,8 @@ ARRAY_KEYS = {
 }
 
 
-def chunk_cache_dir_for_output(output_rrd: Path) -> Path:
-    return Path(output_rrd).expanduser().resolve().with_suffix("") / "chunk_cache"
+def chunk_cache_dir_for_output(output_path: Path) -> Path:
+    return Path(output_path).expanduser().resolve() / "chunk_cache"
 
 
 def chunk_cache_path(cache_dir: Path, chunk_id: int) -> Path:

@@ -49,22 +49,19 @@ bash bash_scripts/train/geoff3d_stage2.sh 2
 
 ## Large-scene reconstruction
 
-Scene definitions are configured in `bash_scripts/benchmark/uav_slam/default_scenes.yaml`. Run a model with:
+Each launcher reconstructs one scene directly with `scripts/run_slrf.py`:
 
 ```bash
-bash bash_scripts/benchmark/uav_slam/ours/geoff3d_gnss_perturb.sh \
-  --cuda-device 0 \
-  --scene-list bash_scripts/benchmark/uav_slam/default_scenes.yaml \
-  --overwrite
+bash bash_scripts/run_slrf/geoff3d.sh \
+  /path/to/scene \
+  /path/to/output
 ```
 
 Available scripts:
 
 ```text
 geoff3d.sh
-geoff3d_gnss_perturb.sh
 pi3x.sh
-pi3x_gnss_perturb.sh
 vggt.sh
 vggt_omega.sh
 ```
@@ -74,17 +71,18 @@ To avoid GT-depth footprints, set
 pass sorts the inputs into non-overlapping sequential chunks and merges a tail
 smaller than 8 images into the previous chunk. Its aligned predictions provide
 the footprints for the normal spatial chunking pass. GeoFF3D uses
-`pose_scale_yaw_translation`; Pi3X, VGGT, and VGGT-Omega use `pose_sim3`.
+`scale_yaw_translation`; Pi3X, VGGT, and VGGT-Omega use `sim3`.
 
-Each script uses its matching training output by default. A custom checkpoint can be supplied with:
+Each script uses its matching checkpoint by default. A custom checkpoint and
+additional Hydra overrides can be supplied with:
 
 ```bash
 CHECKPOINT=/path/to/checkpoint-best.pth \
-bash bash_scripts/benchmark/uav_slam/ours/geoff3d.sh \
-  --scene-list /path/to/scenes.yaml
+bash bash_scripts/run_slrf/geoff3d.sh \
+  /path/to/scene \
+  /path/to/output \
+  max_chunk_size=24
 ```
-
-Chunk size and reconstruction options are defined in `bash_scripts/benchmark/uav_slam/ours/default_params.yaml`. Results are written under `outputs/`.
 
 ## Acknowledgements
 

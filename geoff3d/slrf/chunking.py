@@ -3,28 +3,15 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor
-from pathlib import Path
 from collections import deque
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
-from geoff3d.spatial_rrd.scene_io import (
-    read_depth,
-    resize_depth_to_target,
-    scale_K_to_target,
-)
-
-
-SPATIAL_PARTITIONS = {"footprint_tree", "footprint_grid", "pose_grid", "temporal"}
-FOOTPRINT_SOURCES = {"auto", "depth", "lookat", "center", "predicted"}
+SPATIAL_PARTITIONS = {"footprint_tree", "temporal"}
+FOOTPRINT_SOURCES = {"auto", "prior", "lookat", "center", "sequential"}
 CHUNK_ORDER_STRATEGIES = {
-    "spatial_sort",
     "spatial_center_bfs",
-    "first_frame_bfs",
-    "depth_prior_greedy",
-    "dfs",
     "sequential",
 }
 
@@ -63,7 +50,7 @@ def pose_centers_from_meta(meta: Dict[str, object]) -> np.ndarray:
     return np.stack(centers, axis=0)
 
 
-def pose_grid_axis_indices(axes: str) -> Tuple[int, ...]:
+def spatial_axis_indices(axes: str) -> Tuple[int, ...]:
     mapping = {"x": 0, "y": 1, "z": 2}
     return tuple(mapping[ch] for ch in str(axes).lower())
 
@@ -84,23 +71,6 @@ def infer_footprint_stride(meta: Dict[str, object]) -> int:
     h = int(meta.get("target_h", 0))
     w = int(meta.get("target_w", 0))
     return max(1, int(round(max(h, w) / 64.0)))
-
-
-def estimate_pose_grid_size(coords: np.ndarray, target_core_size: int) -> float:
-    pts = np.asarray(coords, dtype=np.float64).reshape(-1, coords.shape[-1])
-    if pts.shape[0] <= 1:
-        return 1.0
-    target_cells = max(
-        1, int(np.ceil(float(pts.shape[0]) / max(1, int(target_core_size))))
-    )
-    cells_per_axis = max(
-        1, int(np.ceil(target_cells ** (1.0 / float(pts.shape[1]))))
-    )
-    extent = pts.max(axis=0) - pts.min(axis=0)
-    max_extent = float(np.max(extent))
-    if not np.isfinite(max_extent) or max_extent <= 0:
-        return 1.0
-    return max(max_extent / float(cells_per_axis), 1e-6)
 
 
 def auto_core_target_size(max_chunk_size: int) -> int:
@@ -159,16 +129,9 @@ def _chunk_core_center(
 def _chunk_start_index(
     chunks: Sequence[Dict[str, object]],
     centers: np.ndarray,
-    strategy: str,
 ) -> int:
     if not chunks:
         return 0
-    if strategy == "first_frame_bfs":
-        for key_name in ("core_indices", "indices", "overlap_indices"):
-            for i, chunk in enumerate(chunks):
-                if 0 in {int(v) for v in chunk.get(key_name, [])}:
-                    return int(i)
-
     chunk_centers = np.stack(
         [_chunk_core_center(chunk, centers) for chunk in chunks],
         axis=0,
@@ -259,52 +222,6 @@ def _renumber_chunks(
     return out
 
 
-def _attach_parent_graph_topology(
-    ordered: List[Dict[str, object]],
-    source_order: Sequence[int],
-    adjacency: Sequence[Sequence[int]],
-) -> None:
-    """Attach a rooted parent graph without changing execution order.
-
-    This is used by fixed-grid ablations. Each chunk selects an already
-    executed adjacent chunk as parent, preferring the one sharing the most
-    input views. The adaptive-tree path remains untouched.
-    """
-    old_to_new = {int(old): int(new) for new, old in enumerate(source_order)}
-    levels: Dict[int, int] = {}
-    for new_id, old_id in enumerate(source_order):
-        chunk = ordered[new_id]
-        chunk["alignment_topology"] = "parent_graph"
-        if new_id == 0:
-            chunk["align_parent_id"] = None
-            chunk["align_level"] = 0
-            levels[new_id] = 0
-            continue
-
-        current_indices = {int(v) for v in chunk.get("indices", [])}
-        candidates = [
-            old_to_new[int(neighbor)]
-            for neighbor in adjacency[int(old_id)]
-            if int(neighbor) in old_to_new
-            and old_to_new[int(neighbor)] < new_id
-        ]
-        if not candidates:
-            candidates = list(range(new_id))
-        parent_id = max(
-            candidates,
-            key=lambda candidate: (
-                len(
-                    current_indices
-                    & {int(v) for v in ordered[candidate].get("indices", [])}
-                ),
-                -candidate,
-            ),
-        )
-        chunk["align_parent_id"] = int(parent_id)
-        chunk["align_level"] = int(levels[parent_id] + 1)
-        levels[new_id] = int(levels[parent_id] + 1)
-
-
 def _attach_adjacency_metadata(
     ordered: List[Dict[str, object]],
     source_order: Sequence[int],
@@ -339,7 +256,6 @@ def _append_disconnected_component(
     visited: Set[int],
     chunk_centers: np.ndarray,
     scene_center: np.ndarray,
-    lifo: bool,
 ) -> None:
     unvisited = [i for i in range(chunk_centers.shape[0]) if i not in visited]
     if not unvisited:
@@ -356,10 +272,7 @@ def _append_disconnected_component(
             i,
         ),
     )
-    if lifo:
-        queue.append(next_i)
-    else:
-        queue.append(next_i)
+    queue.append(next_i)
 
 
 def order_spatial_chunks(
@@ -395,92 +308,34 @@ def order_spatial_chunks(
             "alignment_topology": "sequential_parent_chain",
         }
 
-    if strategy == "spatial_sort":
-        order = list(range(len(chunks)))
-        ordered = _renumber_chunks(chunks, order, strategy)
-        centers = pose_centers_from_meta(meta)
-        adjacency, _chunk_centers = _chunk_adjacency(chunks, centers)
-        _attach_adjacency_metadata(ordered, order, adjacency)
-        if any(
-            str(chunk.get("partition", "")) in {"footprint_grid", "pose_grid"}
-            for chunk in ordered
-        ):
-            _attach_parent_graph_topology(ordered, order, adjacency)
-        return ordered, {
-            "strategy": strategy,
-            "order": order,
-            "source_chunk_ids": [int(chunks[i].get("chunk_id", i)) for i in order],
-            "num_adjacency_edges": int(sum(len(v) for v in adjacency) // 2),
-        }
-
     centers = pose_centers_from_meta(meta)
     adjacency, chunk_centers = _chunk_adjacency(chunks, centers)
     scene_center = np.nanmean(centers, axis=0)
-
-    if strategy == "depth_prior_greedy":
-        start = _chunk_start_index(chunks, centers, "spatial_center_bfs")
-        visited: Set[int] = set()
-        predicted_frames: Set[int] = set()
-        order: List[int] = []
-        current = int(start)
-        while len(order) < len(chunks):
-            visited.add(current)
-            order.append(current)
-            predicted_frames.update(int(v) for v in chunks[current].get("indices", []))
-
-            candidates = [i for i in range(len(chunks)) if i not in visited]
-            if not candidates:
-                break
-            neighbor_set = set()
-            for v in visited:
-                neighbor_set.update(adjacency[v])
-            current = max(
-                candidates,
-                key=lambda i: (
-                    len({int(v) for v in chunks[i].get("overlap_indices", [])} & predicted_frames),
-                    int(i in neighbor_set),
-                    -float(np.linalg.norm(chunk_centers[i] - chunk_centers[current])),
-                    -float(np.linalg.norm(chunk_centers[i] - scene_center)),
-                    -i,
-                ),
+    start = _chunk_start_index(chunks, centers)
+    queue: deque = deque([int(start)])
+    visited: Set[int] = set()
+    order: List[int] = []
+    while len(order) < len(chunks):
+        if not queue:
+            _append_disconnected_component(
+                queue,
+                visited,
+                chunk_centers,
+                scene_center,
             )
-    else:
-        start = _chunk_start_index(chunks, centers, strategy)
-        lifo = strategy == "dfs"
-        queue: deque = deque([int(start)])
-        visited = set()
-        order = []
-        while len(order) < len(chunks):
             if not queue:
-                _append_disconnected_component(
-                    queue,
-                    visited,
-                    chunk_centers,
-                    scene_center,
-                    lifo=lifo,
-                )
-                if not queue:
-                    break
-            current = int(queue.pop() if lifo else queue.popleft())
-            if current in visited:
-                continue
-            visited.add(current)
-            order.append(current)
-            neighbors = [n for n in adjacency[current] if n not in visited]
-            if lifo:
-                for neighbor in reversed(neighbors):
-                    queue.append(neighbor)
-            else:
-                for neighbor in neighbors:
-                    queue.append(neighbor)
+                break
+        current = int(queue.popleft())
+        if current in visited:
+            continue
+        visited.add(current)
+        order.append(current)
+        for neighbor in adjacency[current]:
+            if neighbor not in visited:
+                queue.append(neighbor)
 
     ordered = _renumber_chunks(chunks, order, strategy)
     _attach_adjacency_metadata(ordered, order, adjacency)
-    if any(
-        str(chunk.get("partition", "")) in {"footprint_grid", "pose_grid"}
-        for chunk in ordered
-    ):
-        _attach_parent_graph_topology(ordered, order, adjacency)
     return ordered, {
         "strategy": strategy,
         "order": [int(i) for i in order],
@@ -488,293 +343,6 @@ def order_spatial_chunks(
         "start_source_chunk_id": int(chunks[order[0]].get("chunk_id", order[0])),
         "num_adjacency_edges": int(sum(len(v) for v in adjacency) // 2),
     }
-
-
-# ---------------------------------------------------------------------------
-# Pose-grid partition (legacy)
-# ---------------------------------------------------------------------------
-def build_cell_to_core(
-    coords: np.ndarray,
-    origin: np.ndarray,
-    grid_size: float,
-) -> Dict[Tuple[int, ...], List[int]]:
-    cell_coords = np.floor(
-        (coords - origin[None, :]) / float(grid_size)
-    ).astype(np.int64)
-    cell_to_core: Dict[Tuple[int, ...], List[int]] = {}
-    for frame_idx, cell in enumerate(cell_coords):
-        key = tuple(int(v) for v in cell)
-        cell_to_core.setdefault(key, []).append(int(frame_idx))
-    return cell_to_core
-
-
-def are_neighbor_cells(
-    a: Tuple[int, ...], b: Tuple[int, ...], radius: int
-) -> bool:
-    if a == b:
-        return False
-    return max(abs(int(x) - int(y)) for x, y in zip(a, b)) <= int(radius)
-
-
-def pose_grid_cell_order(
-    cell_keys: Sequence[Tuple[int, ...]],
-) -> List[Tuple[int, ...]]:
-    keys = sorted(tuple(int(v) for v in key) for key in cell_keys)
-    if not keys or len(keys[0]) != 2:
-        return keys
-
-    rows: Dict[int, List[Tuple[int, int]]] = {}
-    for x, y in keys:
-        rows.setdefault(y, []).append((x, y))
-
-    ordered: List[Tuple[int, int]] = []
-    for row_i, y in enumerate(sorted(rows)):
-        row = sorted(rows[y], key=lambda key: key[0], reverse=bool(row_i % 2))
-        ordered.extend(row)
-    return ordered
-
-
-def build_pose_grid_chunks(
-    meta: Dict[str, object],
-    axes: str = "xy",
-    pose_grid_size: float = 0.0,
-    max_chunk_size: int = 32,
-    min_chunk_size: int = 1,
-    max_chunks: int = 0,
-    pose_grid_neighbor_radius: int = 1,
-    coords_override: Optional[np.ndarray] = None,
-    partition_name: str = "pose_grid",
-    extra_grid_meta: Optional[Dict[str, object]] = None,
-) -> Tuple[List[Dict[str, object]], Dict[str, object]]:
-    if coords_override is None:
-        centers = pose_centers_from_meta(meta)
-        axis_indices = pose_grid_axis_indices(axes)
-        coords = centers[:, axis_indices]
-    else:
-        coords = np.asarray(coords_override, dtype=np.float64)
-    origin = coords.min(axis=0)
-    grid_size = float(pose_grid_size)
-    target_core_size = auto_core_target_size(int(max_chunk_size))
-
-    if grid_size <= 0:
-        grid_size = estimate_pose_grid_size(coords, target_core_size)
-        cell_to_core = build_cell_to_core(coords, origin, grid_size)
-        num_grid_refinements = 0
-    else:
-        num_grid_refinements = 0
-        cell_to_core = build_cell_to_core(coords, origin, grid_size)
-        print(
-            "[WARN] --pose_grid_size was set explicitly; automatic grid estimation "
-            "from --max_chunk_size is bypassed."
-        )
-
-    oversized_cells = {
-        key: len(indices)
-        for key, indices in cell_to_core.items()
-        if len(indices) > int(target_core_size)
-    }
-    if oversized_cells:
-        print(
-            "[WARN] Fixed grid contains dense cells; keep the scene-wide grid "
-            "size and split only their image lists to respect model capacity: "
-            f"oversized_cells={len(oversized_cells)}, "
-            f"max_cell_images={max(oversized_cells.values())}, "
-            f"core_capacity={target_core_size}."
-        )
-
-    ordered_cells = pose_grid_cell_order(cell_to_core.keys())
-    cell_centers = {
-        key: coords[np.asarray(indices, dtype=np.int64)].mean(axis=0)
-        for key, indices in cell_to_core.items()
-    }
-
-    chunks: List[Dict[str, object]] = []
-    neighbor_radius = int(pose_grid_neighbor_radius)
-    total_dropped_seam_images = 0
-
-    chunk_order_idx = 0
-    num_split_cells = 0
-    for cell_order_idx, cell_key in enumerate(ordered_cells):
-        cell_core_indices = sorted(cell_to_core[cell_key])
-        core_groups = [
-            cell_core_indices[start : start + int(target_core_size)]
-            for start in range(0, len(cell_core_indices), int(target_core_size))
-        ]
-        if len(core_groups) > 1:
-            num_split_cells += 1
-
-        # The spatial grid remains fixed. A dense cell may produce multiple
-        # capacity-bounded chunks, but it is not spatially refined as a tree.
-        for cell_split_index, core_indices in enumerate(core_groups):
-
-            seam_candidates: List[Tuple[float, int, Tuple[int, ...]]] = []
-            if neighbor_radius > 0:
-                center = coords[np.asarray(core_indices, dtype=np.int64)].mean(axis=0)
-                core_set = set(core_indices)
-                for other_key in ordered_cells:
-                    if (
-                        other_key != cell_key
-                        and not are_neighbor_cells(cell_key, other_key, neighbor_radius)
-                    ):
-                        continue
-                    for idx in cell_to_core[other_key]:
-                        if int(idx) in core_set:
-                            continue
-                        dist = float(
-                            np.linalg.norm(coords[int(idx)] - center)
-                        )
-                        seam_candidates.append(
-                            (dist, int(idx), tuple(int(v) for v in other_key))
-                        )
-
-            seam_candidates.sort(key=lambda item: (item[0], item[1]))
-            budget = max(0, int(max_chunk_size) - len(core_indices))
-            overlap_indices = sorted(
-                {idx for _dist, idx, _cell in seam_candidates[:budget]}
-            )
-            dropped_seam_images = max(
-                0,
-                len({idx for _dist, idx, _cell in seam_candidates})
-                - len(overlap_indices),
-            )
-            total_dropped_seam_images += dropped_seam_images
-
-            indices = sorted(set(core_indices + overlap_indices))
-            core_set = set(core_indices)
-            core_local_indices = [
-                local_i
-                for local_i, global_i in enumerate(indices)
-                if int(global_i) in core_set
-            ]
-            chunks.append(
-                {
-                    "chunk_id": int(len(chunks)),
-                    "partition": str(partition_name),
-                    "cell_order": int(chunk_order_idx),
-                    "grid_cell_order": int(cell_order_idx),
-                    "cell_split_index": int(cell_split_index),
-                    "num_cell_splits": int(len(core_groups)),
-                    "cell_key": tuple(int(v) for v in cell_key),
-                    "indices": indices,
-                    "core_indices": core_indices,
-                    "raw_num_core_images": int(len(cell_core_indices)),
-                    "overlap_indices": overlap_indices,
-                    "core_local_indices": core_local_indices,
-                    "num_seam_candidates": int(
-                        len({idx for _dist, idx, _cell in seam_candidates})
-                    ),
-                    "num_dropped_seam_images": int(dropped_seam_images),
-                }
-            )
-            chunk_order_idx += 1
-            if int(max_chunks) > 0 and len(chunks) >= int(max_chunks):
-                break
-        if int(max_chunks) > 0 and len(chunks) >= int(max_chunks):
-            break
-
-    grid_meta = {
-        "partition": str(partition_name),
-        "axes": str(axes),
-        "grid_size_requested": float(pose_grid_size),
-        "grid_size_effective": float(grid_size),
-        "origin": origin.astype(float).tolist(),
-        "num_occupied_cells": int(len(ordered_cells)),
-        "num_retained_cells": int(
-            len({tuple(chunk["cell_key"]) for chunk in chunks})
-        ),
-        "num_chunks": int(len(chunks)),
-        "num_split_cells": int(num_split_cells),
-        "num_oversized_cells": int(len(oversized_cells)),
-        "num_core_images": int(sum(len(chunk["core_indices"]) for chunk in chunks)),
-        "num_input_images": int(len(meta["stems"])),
-        "core_coverage_ratio": float(
-            sum(len(chunk["core_indices"]) for chunk in chunks)
-            / max(1, len(meta["stems"]))
-        ),
-        "num_grid_refinements": int(num_grid_refinements),
-        "auto_core_target_size": int(target_core_size),
-        "total_dropped_seam_images": int(total_dropped_seam_images),
-        "alignment_topology": "parent_graph",
-        "core_size_stats": {
-            "min": int(min((len(v) for v in cell_to_core.values()), default=0)),
-            "max": int(max((len(v) for v in cell_to_core.values()), default=0)),
-            "mean": float(np.mean([len(v) for v in cell_to_core.values()])) if cell_to_core else 0.0,
-            "std": float(np.std([len(v) for v in cell_to_core.values()])) if cell_to_core else 0.0,
-            "num_under_min": int(sum(len(v) < int(min_chunk_size) for v in cell_to_core.values())),
-        },
-    }
-    if extra_grid_meta:
-        grid_meta.update(extra_grid_meta)
-    num_under_min = int(grid_meta["core_size_stats"]["num_under_min"])
-    if num_under_min > 0:
-        print(
-            "[WARN] Fixed footprint grid retained under-filled cells to preserve "
-            f"full scene coverage: {num_under_min}/{len(cell_to_core)} cells have "
-            f"fewer than min_chunk_size={int(min_chunk_size)} core images."
-        )
-    covered_core = {
-        int(index)
-        for chunk in chunks
-        for index in chunk.get("core_indices", [])
-    }
-    expected_core = set(range(len(meta["stems"])))
-    if int(max_chunks) <= 0 and covered_core != expected_core:
-        missing = sorted(expected_core - covered_core)
-        raise RuntimeError(
-            "Fixed-grid chunking lost core images: "
-            f"covered={len(covered_core)}/{len(expected_core)}, "
-            f"first_missing={missing[:8]}"
-        )
-    return chunks, grid_meta
-
-
-def build_footprint_grid_chunks(
-    meta: Dict[str, object],
-    axes: str = "xy",
-    pose_grid_size: float = 0.0,
-    max_chunk_size: int = 32,
-    min_chunk_size: int = 1,
-    max_chunks: int = 0,
-    pose_grid_neighbor_radius: int = 1,
-    footprint_source: str = "auto",
-    footprint_sample_stride: int = 16,
-    footprint_min_points: int = 32,
-    footprint_quantile_min: float = 0.02,
-    footprint_quantile_max: float = 0.98,
-    footprint_lookat_distance: float = 0.0,
-    footprint_workers: int = 0,
-) -> Tuple[List[Dict[str, object]], Dict[str, object]]:
-    axis_indices = pose_grid_axis_indices(axes)
-    centers_world, _bbox_min, _bbox_max, feature_meta = footprint_features_from_meta(
-        meta,
-        axis_indices=axis_indices,
-        footprint_source=footprint_source,
-        footprint_sample_stride=footprint_sample_stride,
-        footprint_min_points=footprint_min_points,
-        footprint_quantile_min=footprint_quantile_min,
-        footprint_quantile_max=footprint_quantile_max,
-        footprint_lookat_distance=footprint_lookat_distance,
-        footprint_workers=footprint_workers,
-    )
-    flight_frame = estimate_main_flight_frame_from_pose(meta, axis_indices)
-    centers = transform_points_to_flight_frame(centers_world, flight_frame)
-    return build_pose_grid_chunks(
-        meta=meta,
-        axes=axes,
-        pose_grid_size=pose_grid_size,
-        max_chunk_size=max_chunk_size,
-        min_chunk_size=min_chunk_size,
-        max_chunks=max_chunks,
-        pose_grid_neighbor_radius=pose_grid_neighbor_radius,
-        coords_override=centers,
-        partition_name="footprint_grid",
-        extra_grid_meta={
-            "footprint": feature_meta,
-            "footprint_centers": centers_world.astype(float).tolist(),
-            "footprint_centers_flight": centers.astype(float).tolist(),
-            "footprint_flight_frame": flight_frame,
-        },
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -860,151 +428,6 @@ def lookat_point_from_pose(
     return center + forward * max(distance, 1e-6)
 
 
-def _depth_footprint_worker(args: Tuple[object, ...]) -> Tuple[int, Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], str]:
-    (
-        frame_index,
-        depth_path,
-        K,
-        T_c2w,
-        cam_width,
-        cam_height,
-        target_h,
-        target_w,
-        depth_scale,
-        depth_min,
-        depth_max,
-        axis_indices,
-        stride,
-        footprint_min_points,
-        footprint_quantile_min,
-        footprint_quantile_max,
-    ) = args
-    try:
-        depth_raw = read_depth(Path(str(depth_path)), depth_scale=float(depth_scale))
-        K_scaled = scale_K_to_target(
-            K=np.asarray(K, dtype=np.float64),
-            cam_width=cam_width,
-            cam_height=cam_height,
-            source_h=depth_raw.shape[0],
-            source_w=depth_raw.shape[1],
-            target_h=int(target_h),
-            target_w=int(target_w),
-        )
-        depth = resize_depth_to_target(
-            depth_raw,
-            target_h=int(target_h),
-            target_w=int(target_w),
-        )
-
-        stride = max(1, int(stride))
-        ys = np.arange(0, depth.shape[0], stride, dtype=np.float64)
-        xs = np.arange(0, depth.shape[1], stride, dtype=np.float64)
-        u, v = np.meshgrid(xs, ys)
-        z = depth[::stride, ::stride].astype(np.float64)
-        valid = (
-            np.isfinite(z)
-            & (z > float(depth_min))
-            & (z < float(depth_max))
-        )
-        if int(np.count_nonzero(valid)) < int(footprint_min_points):
-            return int(frame_index), None, None, None, "not_enough_valid_depth"
-
-        fx, fy = float(K_scaled[0, 0]), float(K_scaled[1, 1])
-        cx, cy = float(K_scaled[0, 2]), float(K_scaled[1, 2])
-        if abs(fx) < 1e-12 or abs(fy) < 1e-12:
-            return int(frame_index), None, None, None, "invalid_intrinsics"
-
-        x = (u - cx) * z / fx
-        y = (v - cy) * z / fy
-        pts_cam = np.stack([x, y, z], axis=-1)
-        pts_cam = pts_cam[valid].reshape(-1, 3)
-        T = np.asarray(T_c2w, dtype=np.float64)
-        pts_world = pts_cam @ T[:3, :3].T + T[:3, 3][None, :]
-        finite = np.isfinite(pts_world).all(axis=1)
-        pts_world = pts_world[finite]
-        if pts_world.shape[0] < int(footprint_min_points):
-            return int(frame_index), None, None, None, "not_enough_finite_points"
-
-        coords = pts_world[:, tuple(axis_indices)].astype(np.float32, copy=False)
-        bbox_min, bbox_max = robust_bbox(
-            coords,
-            float(footprint_quantile_min),
-            float(footprint_quantile_max),
-        )
-        center_coord = np.median(coords, axis=0).astype(np.float64)
-        return int(frame_index), center_coord, bbox_min, bbox_max, "ok"
-    except Exception as exc:
-        return int(frame_index), None, None, None, f"error:{exc}"
-
-
-def _depth_footprints_from_meta(
-    meta: Dict[str, object],
-    axis_indices: Tuple[int, ...],
-    footprint_sample_stride: int,
-    footprint_min_points: int,
-    footprint_quantile_min: float,
-    footprint_quantile_max: float,
-    footprint_workers: int,
-) -> Dict[int, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
-    stems = list(meta["stems"])
-    cams = meta.get("cams", {})
-    depth_paths = meta.get("depth_paths", {})
-    jobs: List[Tuple[object, ...]] = []
-    for i, stem in enumerate(stems):
-        cam = cams.get(stem)
-        depth_path = depth_paths.get(stem) if isinstance(depth_paths, dict) else None
-        if cam is None or not depth_path:
-            continue
-        jobs.append(
-            (
-                int(i),
-                str(depth_path),
-                np.asarray(cam["K"], dtype=np.float64),
-                np.asarray(cam["T_c2w"], dtype=np.float64),
-                cam.get("width"),
-                cam.get("height"),
-                int(meta["target_h"]),
-                int(meta["target_w"]),
-                float(meta.get("depth_scale", 1.0)),
-                float(meta.get("depth_min", 1e-6)),
-                float(meta.get("depth_max", 1e6)),
-                tuple(int(a) for a in axis_indices),
-                int(footprint_sample_stride),
-                int(footprint_min_points),
-                float(footprint_quantile_min),
-                float(footprint_quantile_max),
-            )
-        )
-
-    if not jobs:
-        return {}
-
-    workers = int(footprint_workers)
-    if workers > 1 and len(jobs) > 1:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(_depth_footprint_worker, jobs))
-    else:
-        results = [_depth_footprint_worker(job) for job in jobs]
-
-    out: Dict[int, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-    failed = 0
-    for frame_index, center, bbox_min, bbox_max, status in results:
-        if status == "ok" and center is not None and bbox_min is not None and bbox_max is not None:
-            out[int(frame_index)] = (
-                np.asarray(center, dtype=np.float64),
-                np.asarray(bbox_min, dtype=np.float64),
-                np.asarray(bbox_max, dtype=np.float64),
-            )
-        else:
-            failed += 1
-    if failed:
-        print(
-            f"[INFO] footprint depth sampling skipped/fell back for "
-            f"{failed}/{len(results)} frames."
-        )
-    return out
-
-
 def point_bbox(point: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     p = np.asarray(point, dtype=np.float64).reshape(-1)
     return p.copy(), p.copy()
@@ -1031,12 +454,12 @@ def footprint_features_from_meta(
         pose_centers, gt_points
     )
     source_requested = str(footprint_source)
-    counts = {"depth": 0, "lookat": 0, "center": 0, "predicted": 0}
-    if source_requested == "predicted":
-        predicted = meta.get("predicted_footprints", {})
-        centers = np.asarray(predicted.get("centers", []), dtype=np.float64)
-        bbox_mins = np.asarray(predicted.get("bbox_mins", []), dtype=np.float64)
-        bbox_maxs = np.asarray(predicted.get("bbox_maxs", []), dtype=np.float64)
+    counts = {"prior": 0, "lookat": 0, "center": 0, "predicted": 0}
+    if source_requested in {"prior", "sequential"}:
+        estimated = meta.get("estimated_footprints", {})
+        centers = np.asarray(estimated.get("centers", []), dtype=np.float64)
+        bbox_mins = np.asarray(estimated.get("bbox_mins", []), dtype=np.float64)
+        bbox_maxs = np.asarray(estimated.get("bbox_maxs", []), dtype=np.float64)
         expected_shape = (len(stems), len(axis_indices))
         if (
             centers.shape != expected_shape
@@ -1047,31 +470,19 @@ def footprint_features_from_meta(
             or not np.isfinite(bbox_maxs).all()
         ):
             raise ValueError(
-                "Predicted footprint arrays are missing or invalid: "
+                "Estimated footprint arrays are missing or invalid: "
                 f"expected shape {expected_shape}, got centers={centers.shape}, "
                 f"bbox_mins={bbox_mins.shape}, bbox_maxs={bbox_maxs.shape}."
             )
-        feature_meta = dict(predicted.get("meta", {}))
+        feature_meta = dict(estimated.get("meta", {}))
         feature_meta.update(
             {
-                "footprint_source_requested": "predicted",
-                "footprint_source_counts": {"predicted": len(stems)},
-                "footprint_sources": ["predicted"] * len(stems),
+                "footprint_source_requested": source_requested,
+                "footprint_source_counts": {source_requested: len(stems)},
+                "footprint_sources": [source_requested] * len(stems),
             }
         )
         return centers, bbox_mins, bbox_maxs, feature_meta
-
-    depth_footprints = {}
-    if source_requested in {"auto", "depth"}:
-        depth_footprints = _depth_footprints_from_meta(
-            meta=meta,
-            axis_indices=axis_indices,
-            footprint_sample_stride=footprint_sample_stride,
-            footprint_min_points=footprint_min_points,
-            footprint_quantile_min=footprint_quantile_min,
-            footprint_quantile_max=footprint_quantile_max,
-            footprint_workers=footprint_workers,
-        )
 
     foot_centers: List[np.ndarray] = []
     bbox_mins: List[np.ndarray] = []
@@ -1084,12 +495,6 @@ def footprint_features_from_meta(
         bbox_min: Optional[np.ndarray] = None
         bbox_max: Optional[np.ndarray] = None
         center_coord: Optional[np.ndarray] = None
-
-        if source_requested in {"auto", "depth"}:
-            fp = depth_footprints.get(int(i))
-            if fp is not None:
-                center_coord, bbox_min, bbox_max = fp
-                source_used = "depth"
 
         if source_used is None and source_requested in {"auto", "lookat"}:
             cam = meta.get("cams", {}).get(stem)
@@ -1127,7 +532,6 @@ def footprint_features_from_meta(
         "min_points": int(footprint_min_points),
         "quantile_min": float(footprint_quantile_min),
         "quantile_max": float(footprint_quantile_max),
-        "depth_sampling_workers": int(footprint_workers),
     }
     return (
         np.stack(foot_centers, axis=0).astype(np.float64),
@@ -1534,7 +938,7 @@ def build_footprint_tree_chunks(
     footprint_neighbor_margin: float = 0.0,
     footprint_workers: int = 0,
 ) -> Tuple[List[Dict[str, object]], Dict[str, object]]:
-    axis_indices = pose_grid_axis_indices(axes)
+    axis_indices = spatial_axis_indices(axes)
     centers_world, bbox_mins_world, bbox_maxs_world, feature_meta = footprint_features_from_meta(
         meta,
         axis_indices=axis_indices,
@@ -1854,8 +1258,6 @@ def build_spatial_chunks(
     max_chunk_size: int = 32,
     min_chunk_size: int = 1,
     max_chunks: int = 0,
-    pose_grid_size: float = 0.0,
-    pose_grid_neighbor_radius: int = 1,
     footprint_source: str = "auto",
     footprint_sample_stride: int = -1,  # auto: infer from image resolution
     footprint_min_points: int = 32,
@@ -1867,6 +1269,11 @@ def build_spatial_chunks(
     temporal_overlap_ratio: float = 0.25,
 ) -> Tuple[List[Dict[str, object]], Dict[str, object]]:
     partition = str(spatial_partition).strip().lower()
+    if partition not in SPATIAL_PARTITIONS:
+        raise ValueError(
+            f"Unknown spatial partition: {spatial_partition!r}. "
+            f"Supported modes: {sorted(SPATIAL_PARTITIONS)}"
+        )
 
     if partition == "temporal":
         return build_temporal_chunks(
@@ -1877,7 +1284,7 @@ def build_spatial_chunks(
             overlap_ratio=temporal_overlap_ratio,
         )
 
-    if footprint_source == "predicted":
+    if footprint_source == "sequential":
         axes = "xy"
     elif axes == "auto":
         axes = infer_spatial_axes(meta)
@@ -1885,35 +1292,6 @@ def build_spatial_chunks(
 
     if footprint_sample_stride <= 0:
         footprint_sample_stride = infer_footprint_stride(meta)
-
-    if partition == "pose_grid":
-        return build_pose_grid_chunks(
-            meta=meta,
-            axes=axes,
-            pose_grid_size=pose_grid_size,
-            max_chunk_size=max_chunk_size,
-            min_chunk_size=min_chunk_size,
-            max_chunks=max_chunks,
-            pose_grid_neighbor_radius=pose_grid_neighbor_radius,
-        )
-
-    if partition == "footprint_grid":
-        return build_footprint_grid_chunks(
-            meta=meta,
-            axes=axes,
-            pose_grid_size=pose_grid_size,
-            max_chunk_size=max_chunk_size,
-            min_chunk_size=min_chunk_size,
-            max_chunks=max_chunks,
-            pose_grid_neighbor_radius=pose_grid_neighbor_radius,
-            footprint_source=footprint_source,
-            footprint_sample_stride=footprint_sample_stride,
-            footprint_min_points=footprint_min_points,
-            footprint_quantile_min=footprint_quantile_min,
-            footprint_quantile_max=footprint_quantile_max,
-            footprint_lookat_distance=footprint_lookat_distance,
-            footprint_workers=footprint_workers,
-        )
 
     return build_footprint_tree_chunks(
         meta=meta,

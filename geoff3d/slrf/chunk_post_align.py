@@ -21,15 +21,15 @@ try:
 except Exception:  # pragma: no cover - tqdm is optional
     tqdm = None
 
-from geoff3d.spatial_rrd.geometry_align import (
+from geoff3d.slrf.geometry_align import (
     apply_similarity_to_points,
     estimate_similarity_umeyama,
 )
-from geoff3d.spatial_rrd.chunk_cache import (
+from geoff3d.slrf.chunk_cache import (
     get_cached_points,
     get_cached_sequence,
 )
-from geoff3d.spatial_rrd.chunk_transform import (
+from geoff3d.slrf.chunk_transform import (
     apply_record_similarity_to_points,
     compose_record_similarity,
     ensure_record_similarity,
@@ -438,106 +438,6 @@ def _collect_common_view_correspondences(
     )
 
 
-def _sample_node_points(
-    records: Sequence[Dict[str, object]],
-    node: _AlignNode,
-    rng: np.random.Generator,
-    max_points: int,
-    runtime_cache: Optional[_RuntimeCache],
-) -> np.ndarray:
-    pts_all: List[np.ndarray] = []
-    for rid in sorted(node.record_ids):
-        record = records[int(rid)]
-        pts = _cached_points(record, int(rid), "core_pred_points", runtime_cache)
-        if pts.size == 0:
-            pts = _cached_points(record, int(rid), "chunk_pred_points", runtime_cache)
-        if pts.size == 0:
-            continue
-        finite = np.isfinite(pts).all(axis=1)
-        pts = pts[finite]
-        if pts.shape[0] > 0:
-            pts_all.append(apply_record_similarity_to_points(record, pts))
-
-    if not pts_all:
-        return np.empty((0, 3), dtype=np.float32)
-
-    pts = np.concatenate(pts_all, axis=0)
-    take = _sample_indices(pts.shape[0], int(max_points), rng)
-    return pts[take].astype(np.float32, copy=False)
-
-
-def _nearest_neighbor_correspondences(
-    src: np.ndarray,
-    dst: np.ndarray,
-    max_distance_quantile: float = 0.7,
-) -> Tuple[np.ndarray, np.ndarray, Dict[str, object]]:
-    """Fallback point-cloud NN correspondences.
-
-    Prefer common-view correspondences whenever possible. This fallback is only
-    used when no enough common-view correspondences are available.
-    """
-    src = np.asarray(src, dtype=np.float32).reshape(-1, 3)
-    dst = np.asarray(dst, dtype=np.float32).reshape(-1, 3)
-    if src.shape[0] == 0 or dst.shape[0] == 0:
-        return (
-            np.empty((0, 3), dtype=np.float32),
-            np.empty((0, 3), dtype=np.float32),
-            {"source": "nn_fallback", "num_corr": 0},
-        )
-
-    try:
-        from scipy.spatial import cKDTree
-
-        tree = cKDTree(dst.astype(np.float64))
-        dists, nn = tree.query(src.astype(np.float64), k=1, workers=-1)
-    except Exception:
-        # Small fallback without scipy. Keep this path conservative.
-        max_src = min(src.shape[0], 4096)
-        src = src[:max_src]
-        dists_list: List[np.ndarray] = []
-        nn_list: List[np.ndarray] = []
-        block = 512
-        dst64 = dst.astype(np.float64)
-        for s in range(0, src.shape[0], block):
-            q = src[s : s + block].astype(np.float64)
-            dist2 = np.sum((q[:, None, :] - dst64[None, :, :]) ** 2, axis=-1)
-            nn_b = np.argmin(dist2, axis=1)
-            d_b = np.sqrt(dist2[np.arange(nn_b.shape[0]), nn_b])
-            nn_list.append(nn_b)
-            dists_list.append(d_b)
-        nn = np.concatenate(nn_list, axis=0)
-        dists = np.concatenate(dists_list, axis=0)
-
-    finite = np.isfinite(dists)
-    if not finite.any():
-        return (
-            np.empty((0, 3), dtype=np.float32),
-            np.empty((0, 3), dtype=np.float32),
-            {"source": "nn_fallback", "num_corr": 0},
-        )
-
-    q = float(max(0.0, min(1.0, max_distance_quantile)))
-    thr = float(np.quantile(dists[finite], q))
-    keep = finite & (dists <= thr)
-    if not keep.any():
-        return (
-            np.empty((0, 3), dtype=np.float32),
-            np.empty((0, 3), dtype=np.float32),
-            {"source": "nn_fallback", "num_corr": 0},
-        )
-
-    return (
-        src[keep].astype(np.float32, copy=False),
-        dst[nn[keep]].astype(np.float32, copy=False),
-        {
-            "source": "nn_fallback",
-            "num_corr": int(np.count_nonzero(keep)),
-            "distance_quantile": q,
-            "distance_threshold": thr,
-        },
-    )
-
-
 def _record_points_for_shared_views(
     record: Dict[str, object],
     rid: int,
@@ -916,59 +816,12 @@ def _merge_child_into_anchor(
         rng=rng,
         max_points_per_view=int(args.post_chunk_align_max_corr_per_view),
         max_points_total=int(args.post_chunk_align_max_corr),
-        spatial_balance=not bool(
-            getattr(args, "post_chunk_align_no_spatial_balance", False)
-        ),
-        spatial_grid_size=int(
-            getattr(args, "post_chunk_align_spatial_grid_size", 16)
-        ),
-        spatial_min_points_per_cell=int(
-            getattr(args, "post_chunk_align_spatial_min_corr_per_cell", 64)
-        ),
-        spatial_max_points_per_cell=int(
-            getattr(args, "post_chunk_align_spatial_max_corr_per_cell", 0)
-        ),
+        spatial_balance=bool(args.post_chunk_align_spatial_balance),
+        spatial_grid_size=16,
+        spatial_min_points_per_cell=64,
+        spatial_max_points_per_cell=0,
         runtime_cache=runtime_cache,
     )
-
-    used_fallback = False
-    if src.shape[0] < int(args.post_chunk_align_min_corr) and bool(
-        args.post_chunk_align_nn_fallback
-    ):
-        src_pts = _sample_node_points(
-            records, child, rng, int(args.post_chunk_align_nn_points), runtime_cache
-        )
-        dst_pts = _sample_node_points(
-            records, anchor, rng, int(args.post_chunk_align_nn_points), runtime_cache
-        )
-        src_nn, dst_nn, nn_meta = _nearest_neighbor_correspondences(
-            src_pts,
-            dst_pts,
-            max_distance_quantile=float(args.post_chunk_align_nn_quantile),
-        )
-        if src_nn.shape[0] > src.shape[0]:
-            src, dst, corr_meta = src_nn, dst_nn, nn_meta
-            used_fallback = True
-            src, dst, spatial_meta = _spatially_balanced_sample_correspondences(
-                src,
-                dst,
-                rng=rng,
-                enabled=not bool(
-                    getattr(args, "post_chunk_align_no_spatial_balance", False)
-                ),
-                grid_size=int(
-                    getattr(args, "post_chunk_align_spatial_grid_size", 16)
-                ),
-                max_points_total=int(args.post_chunk_align_max_corr),
-                min_points_per_cell=int(
-                    getattr(args, "post_chunk_align_spatial_min_corr_per_cell", 64)
-                ),
-                max_points_per_cell=int(
-                    getattr(args, "post_chunk_align_spatial_max_corr_per_cell", 0)
-                ),
-            )
-            corr_meta = dict(corr_meta)
-            corr_meta["spatial_balance"] = spatial_meta
 
     tfm = _estimate_transform(
         src=src,
@@ -984,7 +837,6 @@ def _merge_child_into_anchor(
         "anchor_record_ids": sorted(int(i) for i in anchor.record_ids),
         "child_record_ids": sorted(int(i) for i in child.record_ids),
         "correspondence": corr_meta,
-        "used_nn_fallback": bool(used_fallback),
         **tfm,
     }
 

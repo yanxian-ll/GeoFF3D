@@ -1,5 +1,7 @@
 # String for model factory (Options: "geoff3d", "pi3x", "vggt")
 model_str: ???
+# Input image size must be divisible by the model patch size.
+patch_size: ???
 # Model config
 model_config:
   # Path to pretrained model checkpoint

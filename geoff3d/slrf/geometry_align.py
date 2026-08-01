@@ -6,9 +6,8 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-import torch
 
-from geoff3d.spatial_rrd.scene_io import (
+from geoff3d.slrf.scene_io import (
     estimate_scale_from_random_baselines,
     sample_alignment_correspondences,
 )
@@ -19,206 +18,12 @@ from geoff3d.spatial_rrd.scene_io import (
 ALIGN_MODES = {
     "none",
     "scale",
-    "pose_translation",
-    "pose_scale",
-    "pose_scale_yaw_translation",
-    "pose_sim3",
+    "translation",
+    "scale_translation",
+    "scale_yaw_translation",
+    "yaw_translation",
+    "sim3",
 }
-
-ALIGN_ALIASES = {
-    "translation": "pose_translation",
-    "pose_trans": "pose_translation",
-    "pose-translation": "pose_translation",
-    "pose-scale": "pose_scale",
-    "pose_scale_only": "pose_scale",
-    "pose-scale-only": "pose_scale",
-    "pose_scale_yaw_trans": "pose_scale_yaw_translation",
-    "pose-scale-yaw-trans": "pose_scale_yaw_translation",
-    "pose_scale_xy": "pose_scale_yaw_translation",
-    "pose-scale-xy": "pose_scale_yaw_translation",
-    "pose_scale_xy_rot_trans": "pose_scale_yaw_translation",
-    "pose-scale-xy-rot-trans": "pose_scale_yaw_translation",
-    "pose_full": "pose_sim3",
-    "pose-full": "pose_sim3",
-    "pose_scale_rotation_translation": "pose_sim3",
-    "pose-scale-rotation-translation": "pose_sim3",
-    "pose_srt": "pose_sim3",
-    "pose-srt": "pose_sim3",
-}
-
-POSE_TRANSLATION_ALIGN_MODES = {
-    "pose_translation",
-    "pose_scale",
-    "pose_scale_yaw_translation",
-    "pose_sim3",
-}
-
-WORLD_MODELS = {"geoff3d"}
-
-
-def normalize_align_mode(mode: Optional[str]) -> Optional[str]:
-    if mode is None:
-        return None
-    key = str(mode).strip().lower()
-    key = ALIGN_ALIASES.get(key, key)
-    if key not in ALIGN_MODES:
-        raise ValueError(
-            f"Unknown --align mode: {mode}. Supported modes: "
-            "none, scale, pose_scale, pose_scale_yaw_translation, pose_sim3"
-        )
-    return key
-
-
-# ---------------------------------------------------------------------------
-# Auto policy for align mode
-# ---------------------------------------------------------------------------
-def resolve_align_mode(
-    align: str,
-    model: str,
-    meta: Dict[str, object],
-    prior_policy: Optional[Dict[str, object]] = None,
-) -> str:
-    align = str(align).lower().strip()
-    if align != "auto":
-        return normalize_align_mode(align)
-
-    family = "no_prior"
-    if prior_policy is not None:
-        family = str(prior_policy.get("family", "no_prior"))
-
-    has_pose = int(meta.get("num_cam_priors", 0)) == len(meta.get("stems", []))
-
-    if not has_pose:
-        return "none"
-
-    if family == "no_prior":
-        return "pose_translation"
-
-    if family == "input_prior":
-        return "pose_translation"
-
-    if family == "ours":
-        if prior_policy is not None and prior_policy.get("translation") == "input":
-            return "none"
-        return "pose_translation"
-
-    return "pose_translation"
-
-
-# ---------------------------------------------------------------------------
-# Auto policy for recenter
-# ---------------------------------------------------------------------------
-def resolve_recenter_mode(
-    recenter: str,
-    model: str,
-    meta: Dict[str, object],
-    prior_policy: Optional[Dict[str, object]] = None,
-) -> str:
-    recenter = str(recenter).lower().strip()
-    if recenter != "auto":
-        return recenter
-
-    family = "no_prior"
-    if prior_policy is not None:
-        family = str(prior_policy.get("family", "no_prior"))
-
-    has_pose = int(meta.get("num_cam_priors", 0)) == len(meta.get("stems", []))
-
-    if family == "ours" and has_pose:
-        return "mean_camera"
-
-    return "none"
-
-
-# ---------------------------------------------------------------------------
-# Recenter (translation-only coordinate normalization)
-# ---------------------------------------------------------------------------
-def _torch_anchor_from_views(
-    views: Sequence[Dict[str, object]], mode: str
-) -> torch.Tensor:
-    if mode in ("none", "zero"):
-        return torch.zeros(3)
-
-    centers: List[torch.Tensor] = []
-    for view in views:
-        trans = view.get("camera_pose_trans")
-        if trans is not None:
-            t = trans.detach().cpu().reshape(-1)
-            if t.shape[0] >= 3 and torch.isfinite(t[:3]).all():
-                centers.append(t[:3].float())
-
-    if not centers:
-        return torch.zeros(3)
-
-    if mode == "first_camera":
-        return centers[0].clone()
-
-    if mode == "mean_camera":
-        return torch.stack(centers, dim=0).mean(dim=0)
-
-    return torch.zeros(3)
-
-
-def _recenter_torch_views_inplace(
-    views: Sequence[Dict[str, object]],
-    anchor: torch.Tensor,
-) -> None:
-    """Subtract a world-space translation anchor from view priors in-place.
-
-    Important:
-    - camera_pose is [B, 4, 4], only the translation column should change.
-    - camera_pose rotation must not be modified.
-    - camera_pose_quats / world_rotation are rotation-only priors and should not change.
-    - pts3d is a world-space point map, so all xyz points should subtract anchor.
-    """
-    if anchor.norm() < 1e-9:
-        return
-
-    for view in views:
-        # 1. Full camera pose: modify only translation column.
-        pose = view.get("camera_pose")
-        if pose is not None and torch.is_tensor(pose):
-            pose = pose.float().clone()
-            if pose.dim() >= 2 and pose.shape[-2:] == (4, 4):
-                a = anchor.to(device=pose.device, dtype=pose.dtype)
-                pose[..., :3, 3] = pose[..., :3, 3] - a
-                view["camera_pose"] = pose
-            else:
-                print(
-                    f"[WARN] camera_pose has unexpected shape {tuple(pose.shape)}; "
-                    "skip recenter for camera_pose."
-                )
-
-        # 2. Translation-only priors.
-        for key in ("camera_pose_trans", "world_translation"):
-            val = view.get(key)
-            if val is None or not torch.is_tensor(val):
-                continue
-            val = val.float().clone()
-            if val.shape[-1] >= 3:
-                a = anchor.to(device=val.device, dtype=val.dtype)
-                val[..., :3] = val[..., :3] - a
-                view[key] = val
-            else:
-                print(
-                    f"[WARN] {key} has unexpected shape {tuple(val.shape)}; "
-                    f"skip recenter for {key}."
-                )
-
-        # 3. World-space point map.
-        pts = view.get("pts3d")
-        if pts is not None and torch.is_tensor(pts):
-            pts = pts.float().clone()
-            if pts.shape[-1] >= 3:
-                a = anchor.to(device=pts.device, dtype=pts.dtype)
-                pts[..., :3] = pts[..., :3] - a
-                view["pts3d"] = pts
-            else:
-                print(
-                    f"[WARN] pts3d has unexpected shape {tuple(pts.shape)}; "
-                    "skip recenter for pts3d."
-                )
-
 
 def _restore_points_inplace(
     points: np.ndarray,
@@ -266,27 +71,8 @@ def _restore_cameras_inplace(
     return out
 
 
-def maybe_recenter_views_inplace(
-    views: Sequence[Dict[str, object]],
-    recenter: str,
-) -> Optional[np.ndarray]:
-    """Subtract anchor from views inplace. Returns anchor as numpy for restore."""
-    anchor_t = _torch_anchor_from_views(views, recenter)
-    if anchor_t.norm() < 1e-9:
-        return None
-    _recenter_torch_views_inplace(views, anchor_t)
-    return anchor_t.detach().cpu().numpy().astype(np.float64)
-
-
-def maybe_recenter_anchor_from_meta(
-    meta: Dict[str, object],
-    recenter: str,
-) -> Optional[np.ndarray]:
-    """Compute the recenter anchor from camera priors without materializing views."""
-    mode = str(recenter).lower().strip()
-    if mode in ("none", "zero"):
-        return None
-
+def recenter_anchor_from_meta(meta: Dict[str, object]) -> np.ndarray:
+    """Return the mean input-camera center used to recenter every scene."""
     centers: List[np.ndarray] = []
     cams = meta.get("cams", {})
     for stem in meta.get("stems", []):
@@ -298,17 +84,11 @@ def maybe_recenter_anchor_from_meta(
             centers.append(T[:3, 3].astype(np.float64))
 
     if not centers:
-        return None
+        raise ValueError("Cannot recenter scene: no valid input camera centers found.")
 
-    if mode == "first_camera":
-        anchor = centers[0]
-    elif mode == "mean_camera":
-        anchor = np.stack(centers, axis=0).mean(axis=0)
-    else:
-        return None
-
-    if not np.isfinite(anchor).all() or np.linalg.norm(anchor) < 1e-9:
-        return None
+    anchor = np.stack(centers, axis=0).mean(axis=0)
+    if not np.isfinite(anchor).all():
+        raise ValueError("Cannot recenter scene: mean camera center is not finite.")
     return np.asarray(anchor, dtype=np.float64)
 
 
@@ -669,6 +449,14 @@ def estimate_chunk_pose_alignment(
     target_stems: Sequence[str],
     seed: int,
 ) -> Dict[str, object]:
+    if mode == "none":
+        return identity_pose_alignment_meta(
+            mode,
+            chunk_id,
+            "alignment disabled",
+            valid=True,
+        )
+
     ref_corr, cur_corr, matched_stems = (
         matched_pose_translation_correspondences(
             reference_cams_by_stem=reference_cams_by_stem,
@@ -685,7 +473,7 @@ def estimate_chunk_pose_alignment(
             valid=False,
         )
 
-    if mode == "pose_translation":
+    if mode == "translation":
         t = np.median(
             ref_corr.astype(np.float64) - cur_corr.astype(np.float64),
             axis=0,
@@ -745,7 +533,7 @@ def estimate_chunk_pose_alignment(
     yaw = 0.0
     yaw_valid = False
     yaw_note = "yaw not requested"
-    if mode == "pose_sim3":
+    if mode == "sim3":
         scale, R, t, sim3_valid, sim3_note = estimate_similarity_umeyama(
             src=cur_corr,
             dst=ref_corr,
@@ -760,7 +548,7 @@ def estimate_chunk_pose_alignment(
             )
         scale_note = sim3_note
         yaw_note = "full 3D rotation estimated"
-    elif mode == "pose_scale_yaw_translation":
+    elif mode == "scale_yaw_translation":
         scale, R, t, constrained_valid, constrained_meta = (
             estimate_scale_yaw_translation_from_correspondences(
                 src=cur_corr,
@@ -779,6 +567,20 @@ def estimate_chunk_pose_alignment(
         yaw_valid = bool(constrained_meta["yaw_valid"])
         yaw_note = str(constrained_meta["note"])
         num_scale_pairs = int(constrained_meta["num_scale_pairs"])
+    elif mode in {"scale_translation", "yaw_translation"}:
+        if mode == "yaw_translation":
+            scale = 1.0
+            num_scale_pairs = 0
+            yaw, yaw_valid, yaw_note = yaw_rotation_from_xy_correspondences(
+                src_xy=cur_corr[:, :2],
+                dst_xy=ref_corr[:, :2],
+            )
+            R = rotation_matrix_z(yaw)
+            scale_note = "scale fixed to 1.0"
+        else:
+            yaw_note = "yaw not requested"
+        transformed = (float(scale) * cur_corr.astype(np.float64)) @ R.T
+        t = np.median(ref_corr.astype(np.float64) - transformed, axis=0)
 
     if (
         not np.isfinite(scale)
@@ -806,10 +608,14 @@ def estimate_chunk_pose_alignment(
         float(np.median(residual)) if residual.size else float("nan")
     )
     note = f"{scale_note}; {yaw_note}"
-    if mode == "pose_scale":
+    if mode == "scale":
         note += "; no rotation or translation applied"
-    elif mode == "pose_sim3":
+    elif mode == "sim3":
         note += "; full 3D rotation and translation applied"
+    elif mode == "scale_translation":
+        note += "; translation estimated after scale"
+    elif mode == "yaw_translation":
+        note += "; translation estimated after yaw"
     else:
         note += "; translation estimated after scale+yaw"
 

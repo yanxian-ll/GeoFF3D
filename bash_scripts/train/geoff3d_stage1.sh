@@ -19,10 +19,7 @@ torchrun --nproc_per_node ${NUM_GPUS} \
     loss=geoff3d_stage1_loss \
     model=geoff3d \
     model.model_config.pretrained_model_name_or_path="${PI3X_BASE_MODEL:-./checkpoints/pi3x}" \
-    model.model_config.translation_normalization=mean \
-    model.model_config.de_normalize_outputs=true \
-    model.model_config.force_rotation_prior_for_degenerate_translation=false \
-    model.model_config.world_translation_prior_jitter.enabled=false \
+    model.task.world_translation_prior_jitter.enabled=false \
     train_params=geoff3d_stage1 \
     train_params.epochs=80 \
     train_params.warmup_epochs=2 \

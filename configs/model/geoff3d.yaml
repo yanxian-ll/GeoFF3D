@@ -3,6 +3,7 @@ defaults:
   - task: geoff3d_training
 
 model_str: "geoff3d"
+patch_size: 14
 
 model_config:
   name: "geoff3d"
@@ -10,39 +11,7 @@ model_config:
   geometric_input_config: ${model.task}
   pretrained_model_name_or_path: "checkpoints/pi3x"
   gradient_checkpointing: true
-  use_conditioning: true
-
-  use_world_translation_prior: true
-  min_translation_prior_views: 3
-  world_translation_prior_jitter:
-    enabled: false
-    apply_prob: 0.75
-    # std values are in normalized translation units. Before _norm_t, the
-    # sampled delta is mapped back by the scene translation scale.
-    std_xy: 0.03
-    std_z: 0.10
-    bias_std_xy: 0.01
-    bias_std_z: 0.03
-
-  use_world_rotation_prior: true
-  min_rotation_prior_views: 3
-  # Train-only fallback: if valid translation priors are <=2 or nearly
-  # collinear, force at least one world rotation prior for that sample.
-  force_rotation_prior_for_degenerate_translation: true
-  translation_collinearity_threshold: 0.05
-  translation_degenerate_baseline_eps: 1.0e-6
-
-  translation_normalization: "mean"  # choices: mean, scale
-  depth_prior_normalization: "world_translation"  # choices: world_translation, mean_aug
-  de_normalize_outputs: true
-  translation_encoder_hidden_dim: 256
-  zero_init_translation_encoder: true
-  translation_encoder_input_layer_norm: false
-  rotation_encoder_hidden_dim: 256
-  zero_init_rotation_encoder: true
-  rotation_encoder_input_layer_norm: false
 
 data_norm_type: "identity"
 pretrained: null
-
 torch_hub_force_reload: False

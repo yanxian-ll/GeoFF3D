@@ -1,5 +1,6 @@
 # String for model factory
 model_str: "vggt"
+patch_size: 14
 # Model config
 model_config:
   name: "vggt"

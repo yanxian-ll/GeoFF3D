@@ -22,57 +22,6 @@ from geoff3d.utils.geometry import (
 from geoff3d.utils.torch_hub_setup import configure_torch_hub
 
 # ---------------------------------------------------------------------------
-# Model families
-# ---------------------------------------------------------------------------
-NO_PRIOR_MODELS = {
-    "vggt",
-}
-
-INPUT_PRIOR_MODELS = {
-    "geoff3d",
-    "pi3x",
-}
-
-OUR_WORLD_MODELS = {
-    "geoff3d",
-}
-
-WORLD_TRANSLATION_PRIOR_MODELS = {
-    "geoff3d",
-}
-
-WORLD_ROTATION_PRIOR_MODELS = {
-    "geoff3d",
-}
-
-RAY_PRIOR_MODELS = {
-    "geoff3d",
-    "pi3x",
-}
-
-DEPTH_PRIOR_MODELS = {
-    "geoff3d",
-    "pi3x",
-}
-
-
-def infer_model_family(model_name: str) -> str:
-    name = str(model_name).lower().strip()
-
-    if name in OUR_WORLD_MODELS:
-        return "ours"
-
-    if name in INPUT_PRIOR_MODELS:
-        return "input_prior"
-
-    if name in NO_PRIOR_MODELS:
-        return "no_prior"
-
-    # 默认按无先验模型处理，避免错误喂入 prior 造成不稳定
-    return "no_prior"
-
-
-# ---------------------------------------------------------------------------
 # Prior policy resolution
 # ---------------------------------------------------------------------------
 def _resolve_requested_source(requested: str, default: str) -> str:
@@ -96,18 +45,18 @@ def _has_any_depth_priors(meta: Dict[str, object]) -> bool:
 
 
 def resolve_prior_policy(args, model_name: str, meta: Dict[str, object]) -> Dict[str, object]:
-    family = str(args.model_family)
-    if family == "auto":
-        family = infer_model_family(model_name)
+    model_name = str(model_name).lower().strip()
+    if model_name not in {"geoff3d", "pi3x", "pi3", "vggt", "vggt_omega"}:
+        raise ValueError(f"Unsupported model: {model_name!r}")
 
     has_pose = _has_all_camera_priors(meta)
     has_cam = _has_any_camera_priors(meta)
     has_depth = _has_any_depth_priors(meta)
 
     policy = {
-        "family": family,
+        "model": model_name,
 
-        # 完整 pose prior：给 geoff3d / pi3x 使用
+        # 完整 pose prior：给 pi3x 使用
         "pose": "none",
 
         # split pose prior：给 geoff3d 使用
@@ -125,7 +74,7 @@ def resolve_prior_policy(args, model_name: str, meta: Dict[str, object]) -> Dict
         "bootstrap_depth": False,
     }
 
-    if family == "no_prior":
+    if model_name in {"pi3", "vggt", "vggt_omega"}:
         policy.update({
             "pose": "none",
             "translation": "none",
@@ -137,13 +86,11 @@ def resolve_prior_policy(args, model_name: str, meta: Dict[str, object]) -> Dict
         })
         return policy
 
-    if family == "input_prior":
-        pose_default = "input" if has_pose else "none"
-        ray_default = "input" if has_cam else "pred"
+    if model_name == "pi3x":
         depth_default = "input" if has_depth else "pred"
 
-        pose = _resolve_requested_source(args.pose_prior, pose_default)
-        ray = _resolve_requested_source(args.ray_prior, ray_default)
+        pose = str(args.pose_prior).lower().strip()
+        ray = str(args.ray_prior).lower().strip()
         depth = _resolve_requested_source(args.depth_prior, depth_default)
 
         if pose == "input" and not has_pose:
@@ -169,23 +116,24 @@ def resolve_prior_policy(args, model_name: str, meta: Dict[str, object]) -> Dict
         })
         return policy
 
-    if family == "ours":
-        translation_default = "input" if has_cam else "none"
-        rotation_default = "input" if has_cam else "none"
-        ray_default = "input" if has_cam else "pred"
+    if model_name == "geoff3d":
         depth_default = "input" if has_depth else "pred"
 
-        translation = _resolve_requested_source(args.translation_prior, translation_default)
-        rotation = _resolve_requested_source(args.rotation_prior, rotation_default)
-        ray = _resolve_requested_source(args.ray_prior, ray_default)
+        translation = str(args.translation_prior).lower().strip()
+        rotation = str(args.rotation_prior).lower().strip()
+        ray = str(args.ray_prior).lower().strip()
         depth = _resolve_requested_source(args.depth_prior, depth_default)
 
-        if translation == "input" and not has_cam:
-            translation = "none"
-        if rotation == "input" and not has_cam:
-            rotation = "none"
-        if ray == "input" and not has_cam:
-            ray = "pred"
+        if translation != "input":
+            raise ValueError(
+                "GeoFF3D requires translation_prior=input, "
+                f"got {args.translation_prior!r}."
+            )
+
+        if not has_cam:
+            raise ValueError(
+                "GeoFF3D requires camera inputs for translation_prior=input."
+            )
         if depth == "input" and not has_depth:
             depth = "pred"
 
@@ -200,7 +148,7 @@ def resolve_prior_policy(args, model_name: str, meta: Dict[str, object]) -> Dict
         })
         return policy
 
-    raise ValueError(f"Unknown model family: {family}")
+    raise AssertionError(f"Unhandled model: {model_name!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -225,17 +173,21 @@ POSE_KEYS = {
 
 TRANSLATION_KEYS = {
     "world_translation",
+    "world_translation_mask",
     "camera_pose_trans",
 }
 
 ROTATION_KEYS = {
     "camera_pose",
     "camera_pose_quats",
+    "world_rotation",
+    "world_rotation_mask",
 }
 
 RAY_KEYS = {
     "camera_intrinsics",
     "ray_directions_cam",
+    "ray_dirs_mask",
 }
 
 DEPTH_KEYS = {
@@ -254,17 +206,17 @@ def filter_views_for_prior_policy(
     policy: Dict[str, object],
 ) -> List[Dict[str, object]]:
     out: List[Dict[str, object]] = []
-    family = str(policy.get("family", "no_prior"))
+    model_name = str(policy["model"])
 
     for view in views:
         next_view = {k: v for k, v in view.items() if k in BASE_VIEW_KEYS}
 
-        if family == "input_prior" and policy.get("pose") == "input":
+        if model_name == "pi3x" and policy.get("pose") == "input":
             for k in POSE_KEYS | {"world_translation"}:
                 if k in view:
                     next_view[k] = view[k]
 
-        if family == "ours":
+        if model_name == "geoff3d":
             if policy.get("translation") == "input":
                 for k in TRANSLATION_KEYS:
                     if k in view:
@@ -294,34 +246,26 @@ def filter_views_for_prior_policy(
 # ---------------------------------------------------------------------------
 def build_prior_overrides(model: str, policy: Dict[str, object]) -> List[str]:
     overrides: List[str] = []
-    model = str(model)
+    model = str(model).lower().strip()
+    if model not in {"geoff3d", "pi3x", "pi3", "vggt", "vggt_omega"}:
+        raise ValueError(f"Unsupported model for prior overrides: {model!r}")
 
     def add_prob(task_key: str, enabled: bool) -> None:
         overrides.append(f"model.task.{task_key}={1.0 if enabled else 0.0}")
 
-    family = str(policy.get("family", "no_prior"))
-
     # 无先验模型：不要传任何 prior override
-    if family == "no_prior":
+    if model in {"pi3", "vggt", "vggt_omega"}:
         return overrides
 
     # 我们自己的 geoff3d：split pose prior
-    if model in WORLD_TRANSLATION_PRIOR_MODELS:
+    if model == "geoff3d":
         use_t = policy.get("translation") == "input"
-        add_prob("world_translation_prob", use_t)
-        overrides.append(
-            f"model.model_config.use_world_translation_prior={str(use_t).lower()}"
-        )
-
-    if model in WORLD_ROTATION_PRIOR_MODELS:
         use_r = policy.get("rotation") == "input"
+        add_prob("world_translation_prob", use_t)
         add_prob("world_rotation_prob", use_r)
-        overrides.append(
-            f"model.model_config.use_world_rotation_prior={str(use_r).lower()}"
-        )
 
     # ray/depth：对支持的模型显式打开或关闭
-    if model in OUR_WORLD_MODELS:
+    if model in {"geoff3d", "pi3x"}:
         add_prob("ray_dirs_prob", policy.get("ray") == "input")
         add_prob("depth_prob", policy.get("depth") == "input")
 
@@ -332,9 +276,9 @@ def build_prior_overrides(model: str, policy: Dict[str, object]) -> List[str]:
 # Runtime prior policy application
 # ---------------------------------------------------------------------------
 def apply_runtime_prior_policy(model: torch.nn.Module, policy: Dict[str, object]) -> None:
-    family = str(policy.get("family", "no_prior"))
+    model_name = str(policy["model"])
 
-    if family == "no_prior":
+    if model_name in {"pi3", "vggt", "vggt_omega"}:
         set_model_task_prob(model, "ray_dirs_prob", False)
         set_model_task_prob(model, "depth_prob", False)
         set_model_task_prob(model, "world_translation_prob", False)

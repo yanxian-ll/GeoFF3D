@@ -11,13 +11,13 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from geoff3d.spatial_rrd.geometry_align import (
+from geoff3d.slrf.geometry_align import (
     apply_similarity_to_cameras,
     apply_similarity_to_points,
     estimate_similarity_umeyama,
 )
-from geoff3d.spatial_rrd.rrd_writer import load_point_cloud_ply, save_point_cloud_ply
-from geoff3d.spatial_rrd.scene_io import load_gt_points_from_meta, sample_points_and_colors
+from geoff3d.slrf.rrd_writer import load_point_cloud_ply, save_point_cloud_ply
+from geoff3d.slrf.scene_io import load_gt_points_from_meta, sample_points_and_colors
 
 
 def json_safe(obj):

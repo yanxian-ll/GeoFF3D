@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import fnmatch
 import math
 import os
 import re
@@ -31,8 +30,10 @@ except Exception:  # pragma: no cover - tqdm is optional
     tqdm = None
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
-DEPTH_EXTS = {".exr", ".npy", ".png", ".tif", ".tiff"}
+DEPTH_EXTS = {".exr"}
 CAM_EXTS = {".txt"}
+DEPTH_MIN_METERS = 1e-6
+DEPTH_MAX_METERS = 1e6
 
 
 def iter_progress(
@@ -379,26 +380,15 @@ def read_exr_depth(path: Path) -> np.ndarray:
     return depth
 
 
-def read_depth(path: Path, depth_scale: float = 1.0) -> np.ndarray:
-    suffix = path.suffix.lower()
-    if suffix == ".npy":
-        depth = np.load(str(path))
-    elif suffix == ".exr":
-        depth = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
-        if depth is None:
-            depth = read_exr_depth(path)
-    else:
-        depth = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
-        if depth is None:
-            raise ValueError(
-                f"Cannot read depth: {path}. For EXR, check "
-                "OPENCV_IO_ENABLE_OPENEXR/OpenCV build."
-            )
+def read_depth(path: Path) -> np.ndarray:
+    if path.suffix.lower() != ".exr":
+        raise ValueError(f"Depth must be a metric EXR file, got: {path}")
+    depth = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if depth is None:
+        depth = read_exr_depth(path)
     if depth.ndim == 3:
         depth = depth[..., 0]
     depth = depth.astype(np.float32)
-    if depth_scale != 1.0:
-        depth = depth / float(depth_scale)
     return depth
 
 
@@ -409,11 +399,11 @@ def _round_down_to_multiple(x: int, m: int) -> int:
 
 
 def compute_target_hw(
-    depth_h: int, depth_w: int, max_side: int, multiple: int
+    depth_h: int, depth_w: int, max_image_size: int, multiple: int
 ) -> Tuple[int, int]:
     h, w = int(depth_h), int(depth_w)
-    if max_side > 0 and max(h, w) > max_side:
-        scale = float(max_side) / float(max(h, w))
+    if max_image_size > 0 and max(h, w) > max_image_size:
+        scale = float(max_image_size) / float(max(h, w))
         h = max(1, int(round(h * scale)))
         w = max(1, int(round(w * scale)))
     h = _round_down_to_multiple(h, multiple)
@@ -610,15 +600,11 @@ def build_views_from_scene(
     images_dir: str = "images",
     cams_dir: str = "cams",
     depth_dir: str = "depth",
-    frame_glob: str = "*",
     num_views: int = 0,
     start: int = 0,
     stride: int = 1,
-    max_side: int = 518,
-    size_multiple: int = 14,
-    depth_scale: float = 1.0,
-    depth_min: float = 1e-6,
-    depth_max: float = 1e6,
+    max_image_size: int = 518,
+    patch_size: int = 14,
     device: torch.device = torch.device("cpu"),
     show_progress: bool = True,
 ) -> Tuple[List[Dict[str, object]], Dict[str, object]]:
@@ -641,10 +627,6 @@ def build_views_from_scene(
         raise RuntimeError(f"No images found under {images_dir_path}.")
 
     selected_stems = sorted(images, key=natural_sort_key)
-    if frame_glob and frame_glob != "*":
-        selected_stems = [
-            s for s in selected_stems if fnmatch.fnmatch(s, frame_glob)
-        ]
     if start > 0:
         selected_stems = selected_stems[int(start):]
     if stride > 1:
@@ -693,8 +675,8 @@ def build_views_from_scene(
     target_h, target_w = compute_target_hw(
         depth_h=ref_h,
         depth_w=ref_w,
-        max_side=max_side,
-        multiple=size_multiple,
+        max_image_size=max_image_size,
+        multiple=patch_size,
     )
 
     views: List[Dict[str, object]] = []
@@ -756,9 +738,6 @@ def build_views_from_scene(
         "depth_paths": depth_paths,
         "cam_paths": cam_path_map,
         "cams": cams,
-        "depth_scale": float(depth_scale),
-        "depth_min": float(depth_min),
-        "depth_max": float(depth_max),
         "num_cam_priors": int(sum(1 for stem in resized_stems if stem in cams)),
         "num_depth_priors": int(
             sum(1 for stem in resized_stems if stem in depths)
@@ -768,8 +747,8 @@ def build_views_from_scene(
     return views, meta
 
 
-def _load_chunk_frame_cpu(args: Tuple[Dict[str, object], Dict[str, object], int, int, float, float, float, bool, bool]) -> Dict[str, object]:
-    view_ref, cam, target_h, target_w, depth_scale, depth_min, depth_max, need_depth, need_rays = args
+def _load_chunk_frame_cpu(args: Tuple[Dict[str, object], Dict[str, object], int, int, bool, bool]) -> Dict[str, object]:
+    view_ref, cam, target_h, target_w, need_depth, need_rays = args
     stem = str(view_ref["stem"])
     rgb_raw = read_rgb(Path(str(view_ref["image_path"])))
 
@@ -793,7 +772,7 @@ def _load_chunk_frame_cpu(args: Tuple[Dict[str, object], Dict[str, object], int,
     rgb = resize_rgb_to_target(rgb_raw, target_h=target_h, target_w=target_w)
     depth: Optional[np.ndarray] = None
     if need_depth and view_ref.get("depth_path"):
-        depth_raw = read_depth(Path(str(view_ref["depth_path"])), depth_scale=depth_scale)
+        depth_raw = read_depth(Path(str(view_ref["depth_path"])))
         if K is not None and cam:
             K = scale_K_to_target(
                 K=np.asarray(cam["K"], dtype=np.float64),
@@ -813,8 +792,6 @@ def _load_chunk_frame_cpu(args: Tuple[Dict[str, object], Dict[str, object], int,
         "K": K,
         "T_c2w": T_c2w,
         "need_rays": bool(need_rays),
-        "depth_min": float(depth_min),
-        "depth_max": float(depth_max),
     }
 
 
@@ -853,9 +830,6 @@ def load_chunk_views_from_scene(
                 cams.get(stem, {}),
                 target_h,
                 target_w,
-                float(meta.get("depth_scale", 1.0)),
-                float(meta.get("depth_min", 1e-6)),
-                float(meta.get("depth_max", 1e6)),
                 need_depth,
                 need_rays,
             )
@@ -929,8 +903,8 @@ def load_chunk_views_from_scene(
             depth_np = np.asarray(depth, dtype=np.float32)
             valid_np = (
                 np.isfinite(depth_np)
-                & (depth_np > float(frame["depth_min"]))
-                & (depth_np < float(frame["depth_max"]))
+                & (depth_np > DEPTH_MIN_METERS)
+                & (depth_np < DEPTH_MAX_METERS)
             )
             depth_t = torch.from_numpy(depth_np).unsqueeze(0).to(device)
             valid_t = torch.from_numpy(valid_np).unsqueeze(0).to(device)
@@ -975,9 +949,6 @@ def _load_gt_points_worker(args: Tuple[object, ...]) -> Tuple[np.ndarray, np.nda
         cam,
         target_h,
         target_w,
-        depth_scale,
-        depth_min,
-        depth_max,
         max_points,
         seed,
     ) = args
@@ -990,7 +961,7 @@ def _load_gt_points_worker(args: Tuple[object, ...]) -> Tuple[np.ndarray, np.nda
             )
 
         rgb_raw = read_rgb(Path(str(image_path)))
-        depth_raw = read_depth(Path(str(depth_path)), depth_scale=float(depth_scale))
+        depth_raw = read_depth(Path(str(depth_path)))
         rgb, depth, K = resize_rgb_depth_K(
             rgb=rgb_raw,
             depth=depth_raw,
@@ -1004,8 +975,8 @@ def _load_gt_points_worker(args: Tuple[object, ...]) -> Tuple[np.ndarray, np.nda
         pts_cam_np, pts_world_np = depth_to_world_points_numpy(depth, K, T_c2w)
         valid = (
             np.isfinite(depth)
-            & (depth > float(depth_min))
-            & (depth < float(depth_max))
+            & (depth > DEPTH_MIN_METERS)
+            & (depth < DEPTH_MAX_METERS)
             & np.isfinite(pts_cam_np).all(axis=-1)
             & np.isfinite(pts_world_np).all(axis=-1)
         )
@@ -1117,9 +1088,6 @@ def load_gt_points_from_meta(
                 cams[stem],
                 int(meta["target_h"]),
                 int(meta["target_w"]),
-                float(meta.get("depth_scale", 1.0)),
-                float(meta.get("depth_min", 1e-6)),
-                float(meta.get("depth_max", 1e6)),
                 int(per_frame_cap),
                 int(seed) + 104729 * (local_i + 1),
             )

@@ -3,7 +3,6 @@ defaults:
 
 # Stage 1 prior probabilities for GeoFF3D training.
 # All priors are fused as encoder-token biases before the decoder.
-overall_prob: 1.0
 
 # Dense priors.
 ray_dirs_prob: 0.5
@@ -12,10 +11,19 @@ sparse_depth_prob: 0.5
 sparsification_removal_percent: 0.9
 
 # World-frame global priors.
+# Stage 1: 1.0 (the default below).
+# Stage 2: 0.7, overridden by bash_scripts/train/geoff3d_stage2.sh.
+# This value must be > 0. Values below 1 apply per-view dropout; GeoFF3D
+# always retains at least three translation-prior views per training sample.
 world_translation_prob: 1.0
 world_rotation_prob: 0.5
 
-# Deprecated compatibility field. It is intentionally ignored by
-# GeoFF3D because the original Pi3X relative pose-injection path
-# has been removed.
-cam_prob: 0.0
+# Train-only augmentation for world-translation priors. Standard deviations
+# are in normalized translation units and are mapped back using scene scale.
+world_translation_prior_jitter:
+  enabled: false
+  apply_prob: 0.75
+  std_xy: 0.03
+  std_z: 0.10
+  bias_std_xy: 0.01
+  bias_std_z: 0.03
