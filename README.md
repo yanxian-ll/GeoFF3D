@@ -84,6 +84,25 @@ bash bash_scripts/run_slrf/geoff3d.sh \
   max_chunk_size=24
 ```
 
+## Benchmarking
+
+The private reproducibility workspace under `benchmarking/` contains unified runners
+for our SLRF methods, streaming and optimization-based baselines, ablations, and
+efficiency/scalability experiments. Dataset, checkpoint, and method paths are configured
+in the YAML file beside each runner. Results are written to
+`experiments/benchmarking/`.
+
+```bash
+python benchmarking/bash_scripts/ours/run_all.py
+bash benchmarking/bash_scripts/stream/run_all.sh
+bash benchmarking/bash_scripts/optim/run_all.sh
+bash benchmarking/bash_scripts/ablation/run_all.sh
+bash benchmarking/bash_scripts/efficiency_scalability/run_all.sh
+```
+
+See [benchmarking/README.md](benchmarking/README.md) for input formats, configuration,
+outputs, checkpoints, and result statistics.
+
 ## Acknowledgements
 
 This project is developed primarily upon [MapAnything](https://github.com/facebookresearch/map-anything). We sincerely thank its authors for releasing their excellent work. We also thank the authors of [Pi3](https://github.com/yyfz/Pi3), [VGGT](https://github.com/facebookresearch/vggt), and the related open-source projects used by this repository.
