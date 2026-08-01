@@ -1,0 +1,113 @@
+# UAV-SLAM benchmark scene list.
+#
+# Structure:
+#   datasets:
+#     - name: dataset_name
+#       enabled: true/false
+#       root: /path/to/dataset/root
+#       params:             # dataset-level overrides
+#       scenes:
+#         - scene_folder_name
+#         - name: custom_output_name
+#           path: scene_folder_name_or_absolute_path
+#           params:         # scene-level overrides
+#
+# Method/runtime defaults live in the method launchers and configs/slrf.yaml.
+# This file stays focused on scene selection and dataset/scene-specific Hydra
+# overrides such as input stride.
+#
+# Nested params blocks are flattened before their leaf values are forwarded to
+# scripts/run_slrf.py as Hydra overrides.
+
+methods:
+  geoff3d:
+    checkpoint: checkpoints/geoff3d/checkpoint-best.pth
+  pi3x:
+    checkpoint: experiments/uav_training/pi3x_finetuning_8v_4d_8ipg_2g/checkpoint-best.pth
+  vggt:
+    checkpoint: experiments/uav_training/vggt_finetuning_8v_4d_8ipg_2g/checkpoint-best.pth
+  vggt_omega:
+    checkpoint: experiments/uav_training/vggt_omega_8v_4d_8ipg_2g/checkpoint-best.pth
+
+datasets:
+  - name: uavff3d_real
+    enabled: true
+    root: /opt/data/private/dataset/data/UAVFF3D-Real
+    scenes:
+      - nanfang_ndir2
+      - yanghaitang_ndir2
+      - xiaoxiang_ndir2
+      - nanfang_part0_ndir
+      # - nanfang_part1_ndir
+      # - xiaoxiang_part0_ndir
+      # - xiaoxiang_part1_ndir
+      # - xiaoxiang_part2_ndir
+      - xiaoxiang_part3_ndir
+      - yanghaitang_part0_ndir
+      # - yanghaitang_part1_ndir
+      # - expand1_chunk12
+      # - expand1_chunk30
+      # - expand2_chunk11
+      # - expand2_chunk15
+      # - expand3_chunk2
+      # - expand3_chunk8
+
+  - name: usegeo
+    enabled: true
+    root: /opt/data/private/dataset/data/usegeo
+    scenes:
+      - dataset1
+      - dataset2
+      - dataset3
+
+  - name: uavscenes
+    enabled: true
+    root: /opt/data/private/dataset/data/uavscenes
+    params:
+      input:
+        stride: 3
+    scenes:
+      - interval5_AMtown01
+      - interval5_AMtown02
+      # - interval5_AMtown03
+      - interval5_AMvalley01
+      - interval5_AMvalley02
+      # - interval5_AMvalley03
+      # - interval5_HKairport_GNSS_Evening
+      # - interval5_HKairport_GNSS01
+      # - interval5_HKairport_GNSS02
+      # - interval5_HKairport_GNSS03
+      - interval5_HKairport01
+      - interval5_HKairport02
+      # - interval5_HKairport03
+      # - interval5_HKisland_GNSS_Evening
+      # - interval5_HKisland_GNSS01
+      # - interval5_HKisland_GNSS02
+      # - interval5_HKisland_GNSS03
+      - interval5_HKisland01
+      - interval5_HKisland02
+      # - interval5_HKisland03
+
+  - name: npu_dronemap
+    enabled: true
+    root: /opt/data/private/dataset/data/NPU_Dronemap
+    scenes:
+      - gopro-monticules-kfs
+      - gopro-npu-kfs
+      - gopro-saplings-kfs
+      - phantom3-factory-kfs
+      - phantom3-freeway-kfs
+      - phantom3-grass-kfs
+      - phantom3-highflower-kfs
+      - phantom3-huangqi-kfs
+      - phantom3-ieu-kfs
+      - phantom3-lowlower-kfs
+      - phantom3-npu-kfs
+      - phantom3-village-kfs
+
+  # - name: urbanscene3d
+  #   enabled: true
+  #   root: /opt/data/private/dataset/data/urbanscene3d
+  #   scenes:
+  #     - artsci_ndir
+  #     - polytech_ndir

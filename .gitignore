@@ -216,3 +216,4 @@ Thumbs.db
 # pdf
 *.pdf
 .venv-rerun-vscode/
+/benchmarking/__pycache__/

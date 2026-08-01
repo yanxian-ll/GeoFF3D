@@ -1,0 +1,62 @@
+# UAV-SLAM benchmark scene list.
+#
+# Structure:
+#   datasets:
+#     - name: dataset_name
+#       enabled: true/false
+#       root: /path/to/dataset/root
+#       params:             # dataset-level overrides
+#       scenes:
+#         - scene_folder_name
+#         - name: custom_output_name
+#           path: scene_folder_name_or_absolute_path
+#           params:         # scene-level overrides
+#
+# Method/runtime defaults are maintained in run.py. This file stays focused on
+# scene selection and scene-specific overrides such as stride and num_views.
+#
+# Nested parameter blocks are flattened before commands are generated.
+
+methods:
+  geoff3d:
+    checkpoint: checkpoints/geoff3d/checkpoint-best.pth
+  lingbot-map:
+    python: python3
+    checkpoint: ""
+  vggt_slam2.0:
+    python: /opt/conda/envs/mapanything/bin/python
+    checkpoint: checkpoints/vggt/model.pt
+
+datasets:
+  - name: uavscenes
+    enabled: true
+    root: /opt/data/private/dataset/data/uavscenes
+    params:
+      input:
+        stride: 1
+    scenes:
+      - name: interval5_AMtown01_n100
+        path: interval5_AMtown01
+        params:
+          input:
+            num_views: 100
+      - name: interval5_AMtown01_n250
+        path: interval5_AMtown01
+        params:
+          input:
+            num_views: 250
+      - name: interval5_AMtown01_n500
+        path: interval5_AMtown01
+        params:
+          input:
+            num_views: 500
+      - name: interval5_AMtown01_n1000
+        path: interval5_AMtown01
+        params:
+          input:
+            num_views: 1000
+      - name: interval5_AMtown01_n2000
+        path: interval5_AMtown01
+        params:
+          input:
+            num_views: 2000
