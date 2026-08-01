@@ -20,6 +20,7 @@ resolution_train: ${dataset.resolution_options.512_many_ar_16ps}
 # Validation Resolution
 resolution_val_a3dreal: ${dataset.resolution_options.512_1_33_ar_16ps}
 resolution_val_usegeo: ${dataset.resolution_options.512_1_33_ar_16ps}
+resolution_val_urbanscene3d: ${dataset.resolution_options.512_1_33_ar_16ps}
 
 # Training Set
 train_dataset:
@@ -31,4 +32,5 @@ train_dataset:
 # Validation Set
 test_dataset: 
   "+ 100 @ ${dataset.usegeo_wai.val.dataset_str}
-  + 100 @ ${dataset.a3dreal_wai.val.dataset_str}"
+  + 100 @ ${dataset.a3dreal_wai.val.dataset_str}
+  + 100 @ ${dataset.urbanscene3d_wai.val.dataset_str}"

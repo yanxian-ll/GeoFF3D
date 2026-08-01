@@ -63,6 +63,7 @@ from geoff3d.datasets.wai.a3dreal import A3DRealWAI       # noqa
 from geoff3d.datasets.wai.a3dsynl import A3DSynLargeWAI   # noqa
 from geoff3d.datasets.wai.a3dsyns import A3DSynSmallWAI   # noqa
 from geoff3d.datasets.wai.usegeo import UseGeoWAI # noqa
+from geoff3d.datasets.wai.urbanscene3d import UrbanScene3DWAI  # noqa
 
 
 def _maybe_wrap_world_augmentation(dataset, world_augmentation=None):

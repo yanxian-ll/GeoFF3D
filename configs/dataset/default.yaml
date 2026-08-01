@@ -7,6 +7,7 @@ defaults:
   - a3dsynl_wai: default
   - a3dsyns_wai: default
   - usegeo_wai: default
+  - urbanscene3d_wai: default
 
 # Training Set, For example: BlendedMVS(split='train', resolution=(512, 384), transform=...)
 train_dataset: ???
