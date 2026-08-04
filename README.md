@@ -6,12 +6,44 @@ GeoFF3D is a scalable feed-forward framework for large-scale UAV 3D reconstructi
 
 ## Installation
 
-Python 3.10+ and a CUDA-compatible PyTorch installation are recommended.
+The tested environment uses Python 3.12, PyTorch 2.5.0, and CUDA 12.1 wheels.
+The commands below intentionally pin the CUDA-dependent packages to the same
+versions as the verified MapAnything environment.
 
 ```bash
 git clone https://github.com/yanxian-ll/GeoFF3D.git
 cd GeoFF3D
+
+# Create and activate the environment.
+conda create -n geoff3d python=3.12 -y
+conda activate geoff3d
+
+# Build and packaging tools.
+conda install -y -c conda-forge git ninja cmake
+python -m pip install -U pip setuptools wheel packaging psutil ninja
+
+# Verified PyTorch/CUDA combination.
+python -m pip install \
+  torch==2.5.0 torchvision==0.20.0 torchaudio==2.5.0 \
+  --index-url https://download.pytorch.org/whl/cu121
+python -m pip install torch-scatter==2.1.2 \
+  -f https://data.pyg.org/whl/torch-2.5.0+cu121.html
+python -m pip install --no-cache-dir \
+  --index-url https://download.pytorch.org/whl/cu121 \
+  xformers==0.0.28.post2
+python -m pip install torch-cluster \
+  -f https://data.pyg.org/whl/torch-2.5.0+cu121.html
+
+# Install GeoFF3D and the remaining Python dependencies. The package metadata
+# pins torch, torchvision, and xformers, so this keeps the versions above.
 pip install -e .
+```
+
+Optional development tools can be installed after the main package:
+
+```bash
+pip install pre-commit pytest pytest-cov ruff
+pre-commit install
 ```
 
 Place pretrained weights under `checkpoints/`. The default Pi3X path is `checkpoints/pi3x`; override it with `PI3X_BASE_MODEL` if needed.

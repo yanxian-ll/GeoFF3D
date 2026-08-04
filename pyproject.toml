@@ -37,12 +37,12 @@ dependencies = [
     "safetensors",
     "scipy>=1.10",
     "tensorboard",
-    "torch>=2.3",
-    "torchvision>=0.18",
+    "torch==2.5.0",
+    "torchvision==0.20.0",
     "tqdm",
     "trimesh",
     "uniception==0.1.6",
-    "xformers",
+    "xformers==0.0.28.post2",
 ]
 
 [project.optional-dependencies]
