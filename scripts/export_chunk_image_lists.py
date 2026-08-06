@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
+from PIL import Image, ImageDraw, ImageOps
 
 from geoff3d.slrf.chunking import (
     build_spatial_chunks,
@@ -37,7 +39,15 @@ from geoff3d.slrf.footprint_estimation import (
     FOOTPRINT_SAMPLE_STRIDE,
     _prior_footprint_worker,
 )
-from geoff3d.slrf.scene_io import build_views_from_scene
+from geoff3d.slrf.scene_io import (
+    DEPTH_MAX_METERS,
+    DEPTH_MIN_METERS,
+    build_views_from_scene,
+    read_depth,
+    read_rgb,
+    resize_rgb_depth_K,
+    sanitize_name,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -111,6 +121,64 @@ def parse_args() -> argparse.Namespace:
         help="Resize multiple used by the scene manifest loader.",
     )
     parser.add_argument(
+        "--save-chunk-montages",
+        action="store_true",
+        help=(
+            "Save all images of every chunk as one fixed-resolution JPEG "
+            "contact sheet."
+        ),
+    )
+    parser.add_argument(
+        "--montage-width",
+        type=int,
+        default=1600,
+        help="Fixed chunk montage width in pixels. Defaults to 1600.",
+    )
+    parser.add_argument(
+        "--montage-height",
+        type=int,
+        default=900,
+        help="Fixed chunk montage height in pixels. Defaults to 900.",
+    )
+    parser.add_argument(
+        "--save-chunk-rrd",
+        action="store_true",
+        help=(
+            "Save one RRD per chunk with input camera poses and a sampled "
+            "metric-depth point cloud."
+        ),
+    )
+    parser.add_argument(
+        "--rrd-depth-stride",
+        type=int,
+        default=8,
+        help=(
+            "Pixel stride used when back-projecting depth for RRD point clouds. "
+            "Defaults to 8."
+        ),
+    )
+    parser.add_argument(
+        "--rrd-max-points",
+        type=int,
+        default=500000,
+        help="Maximum number of depth points saved in each chunk RRD.",
+    )
+    parser.add_argument(
+        "--rrd-point-radius",
+        type=float,
+        default=0.0,
+        help="Rerun point radius. 0 lets the viewer choose automatically.",
+    )
+    parser.add_argument(
+        "--rrd-camera-axis-size",
+        type=float,
+        default=0.0,
+        help=(
+            "Camera-axis size in world units. 0 estimates it from the chunk "
+            "point-cloud extent."
+        ),
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Disable scene-loading progress bars.",
@@ -139,6 +207,16 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("max_image_size must be positive.")
     if args.patch_size <= 0:
         raise ValueError("patch_size must be positive.")
+    if args.montage_width <= 0 or args.montage_height <= 0:
+        raise ValueError("montage width and height must be positive.")
+    if args.rrd_depth_stride <= 0:
+        raise ValueError("rrd_depth_stride must be positive.")
+    if args.rrd_max_points <= 0:
+        raise ValueError("rrd_max_points must be positive.")
+    if args.rrd_point_radius < 0:
+        raise ValueError("rrd_point_radius cannot be negative.")
+    if args.rrd_camera_axis_size < 0:
+        raise ValueError("rrd_camera_axis_size cannot be negative.")
 
 
 def require_matching_priors(meta: Dict[str, object]) -> None:
@@ -316,6 +394,403 @@ def remove_stale_chunk_lists(output_dir: Path) -> None:
             path.unlink()
 
 
+def remove_stale_chunk_artifacts(folder: Path, suffix: str) -> None:
+    if not folder.is_dir():
+        return
+    for path in folder.glob(f"chunk_*{suffix}"):
+        if path.is_file():
+            path.unlink()
+
+
+def montage_grid_shape(num_images: int, width: int, height: int) -> Tuple[int, int]:
+    if num_images <= 0:
+        return 1, 1
+    aspect = float(width) / float(height)
+    cols = max(1, int(math.ceil(math.sqrt(float(num_images) * aspect))))
+    rows = max(1, int(math.ceil(float(num_images) / float(cols))))
+    return rows, cols
+
+
+def save_chunk_montage(
+    *,
+    output_path: Path,
+    image_paths: Sequence[Path],
+    image_names: Sequence[str],
+    width: int,
+    height: int,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas = Image.new("RGB", (int(width), int(height)), (245, 245, 245))
+    draw = ImageDraw.Draw(canvas)
+    rows, cols = montage_grid_shape(len(image_paths), int(width), int(height))
+    cell_w = max(1, int(width) // cols)
+    cell_h = max(1, int(height) // rows)
+    padding = max(2, min(cell_w, cell_h) // 40)
+    label_h = max(16, min(28, cell_h // 7))
+
+    for index, (image_path, image_name) in enumerate(
+        zip(image_paths, image_names)
+    ):
+        row = index // cols
+        col = index % cols
+        x0 = col * cell_w
+        y0 = row * cell_h
+        x1 = min(int(width), x0 + cell_w)
+        y1 = min(int(height), y0 + cell_h)
+        draw.rectangle([x0, y0, x1 - 1, y1 - 1], outline=(190, 190, 190))
+
+        image_box_w = max(1, x1 - x0 - 2 * padding)
+        image_box_h = max(1, y1 - y0 - label_h - 2 * padding)
+        try:
+            with Image.open(image_path) as image:
+                image = ImageOps.exif_transpose(image).convert("RGB")
+                thumb = ImageOps.contain(
+                    image,
+                    (image_box_w, image_box_h),
+                    method=Image.Resampling.LANCZOS,
+                )
+        except Exception as exc:
+            draw.text(
+                (x0 + padding, y0 + padding),
+                f"read failed: {exc}",
+                fill=(170, 0, 0),
+            )
+            continue
+
+        paste_x = x0 + padding + (image_box_w - thumb.width) // 2
+        paste_y = y0 + padding + (image_box_h - thumb.height) // 2
+        canvas.paste(thumb, (paste_x, paste_y))
+
+        label_top = y1 - label_h
+        draw.rectangle(
+            [x0 + 1, label_top, x1 - 1, y1 - 1],
+            fill=(32, 32, 32),
+        )
+        max_chars = max(8, (x1 - x0 - 2 * padding) // 7)
+        label = str(image_name)
+        if len(label) > max_chars:
+            label = "..." + label[-max(1, max_chars - 3) :]
+        draw.text(
+            (x0 + padding, label_top + max(1, (label_h - 11) // 2)),
+            label,
+            fill=(255, 255, 255),
+        )
+
+    canvas.save(output_path, format="JPEG", quality=88, optimize=True)
+
+
+def sample_depth_points_for_frame(
+    *,
+    stem: str,
+    meta: Dict[str, object],
+    stride: int,
+    max_points: int,
+    seed: int,
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, object]]:
+    cams = meta.get("cams", {})
+    image_paths = meta.get("image_paths", {})
+    depth_paths = meta.get("depth_paths", {})
+    cam = cams.get(stem) if isinstance(cams, dict) else None
+    image_path = image_paths.get(stem) if isinstance(image_paths, dict) else None
+    depth_path = depth_paths.get(stem) if isinstance(depth_paths, dict) else None
+    if cam is None or not image_path or not depth_path:
+        raise ValueError(f"Missing RGB, camera, or depth input for {stem}.")
+
+    rgb = read_rgb(Path(str(image_path)))
+    depth = read_depth(Path(str(depth_path)))
+    depth_h, depth_w = depth.shape[:2]
+    rgb, depth, K = resize_rgb_depth_K(
+        rgb=rgb,
+        depth=depth,
+        K=np.asarray(cam["K"], dtype=np.float64),
+        cam_width=cam.get("width"),
+        cam_height=cam.get("height"),
+        target_h=depth_h,
+        target_w=depth_w,
+    )
+
+    ys = np.arange(0, depth_h, int(stride), dtype=np.int64)
+    xs = np.arange(0, depth_w, int(stride), dtype=np.int64)
+    u, v = np.meshgrid(xs.astype(np.float64), ys.astype(np.float64))
+    z = depth[np.ix_(ys, xs)].astype(np.float64)
+    valid = (
+        np.isfinite(z)
+        & (z > DEPTH_MIN_METERS)
+        & (z < DEPTH_MAX_METERS)
+    )
+    if not valid.any():
+        return (
+            np.empty((0, 3), dtype=np.float32),
+            np.empty((0, 3), dtype=np.uint8),
+            {
+                "stem": stem,
+                "num_sampled_pixels": int(z.size),
+                "num_valid_points": 0,
+            },
+        )
+
+    fx, fy = float(K[0, 0]), float(K[1, 1])
+    cx, cy = float(K[0, 2]), float(K[1, 2])
+    if abs(fx) < 1e-12 or abs(fy) < 1e-12:
+        raise ValueError(f"Invalid camera intrinsics for {stem}.")
+
+    x = (u - cx) * z / fx
+    y = (v - cy) * z / fy
+    points_camera = np.stack([x, y, z], axis=-1)[valid].reshape(-1, 3)
+    T_c2w = np.asarray(cam["T_c2w"], dtype=np.float64)
+    points_world = (
+        points_camera @ T_c2w[:3, :3].T + T_c2w[:3, 3][None, :]
+    )
+    colors = rgb[np.ix_(ys, xs)][valid].reshape(-1, 3).astype(np.uint8)
+
+    finite = np.isfinite(points_world).all(axis=1)
+    points_world = points_world[finite]
+    colors = colors[finite]
+    num_valid_before_sampling = int(points_world.shape[0])
+
+    if points_world.shape[0] > int(max_points):
+        rng = np.random.default_rng(int(seed))
+        selection = rng.choice(
+            points_world.shape[0], size=int(max_points), replace=False
+        )
+        points_world = points_world[selection]
+        colors = colors[selection]
+
+    return (
+        points_world.astype(np.float32),
+        colors.astype(np.uint8),
+        {
+            "stem": stem,
+            "num_sampled_pixels": int(z.size),
+            "num_valid_points": num_valid_before_sampling,
+            "num_saved_points": int(points_world.shape[0]),
+            "depth_height": int(depth_h),
+            "depth_width": int(depth_w),
+            "K": K.astype(float).tolist(),
+        },
+    )
+
+
+def build_chunk_input_point_cloud(
+    *,
+    stems: Sequence[str],
+    meta: Dict[str, object],
+    depth_stride: int,
+    max_points: int,
+    seed: int,
+) -> Tuple[np.ndarray, np.ndarray, List[Dict[str, object]], List[str]]:
+    if not stems:
+        return (
+            np.empty((0, 3), dtype=np.float32),
+            np.empty((0, 3), dtype=np.uint8),
+            [],
+            [],
+        )
+
+    per_frame_cap = max(1, int(math.ceil(float(max_points) / len(stems))))
+    points_all: List[np.ndarray] = []
+    colors_all: List[np.ndarray] = []
+    frame_meta: List[Dict[str, object]] = []
+    failed_frames: List[str] = []
+
+    for frame_index, stem in enumerate(stems):
+        try:
+            points, colors, detail = sample_depth_points_for_frame(
+                stem=str(stem),
+                meta=meta,
+                stride=int(depth_stride),
+                max_points=per_frame_cap,
+                seed=int(seed) + 1009 * (frame_index + 1),
+            )
+        except Exception as exc:
+            failed_frames.append(f"{stem}: {exc}")
+            continue
+        frame_meta.append(detail)
+        if points.shape[0] > 0:
+            points_all.append(points)
+            colors_all.append(colors)
+
+    if not points_all:
+        return (
+            np.empty((0, 3), dtype=np.float32),
+            np.empty((0, 3), dtype=np.uint8),
+            frame_meta,
+            failed_frames,
+        )
+
+    points = np.concatenate(points_all, axis=0)
+    colors = np.concatenate(colors_all, axis=0)
+    if points.shape[0] > int(max_points):
+        rng = np.random.default_rng(int(seed) + 7919)
+        selection = rng.choice(points.shape[0], size=int(max_points), replace=False)
+        points = points[selection]
+        colors = colors[selection]
+    return points, colors, frame_meta, failed_frames
+
+
+def camera_records_for_stems(
+    meta: Dict[str, object], stems: Sequence[str]
+) -> List[Dict[str, object]]:
+    cams = meta.get("cams", {})
+    records: List[Dict[str, object]] = []
+    for stem in stems:
+        cam = cams.get(stem) if isinstance(cams, dict) else None
+        if cam is None:
+            continue
+        T_c2w = np.asarray(cam.get("T_c2w"), dtype=np.float64)
+        K = np.asarray(cam.get("K"), dtype=np.float64)
+        if T_c2w.shape != (4, 4) or K.shape != (3, 3):
+            continue
+        if not np.isfinite(T_c2w).all() or not np.isfinite(K).all():
+            continue
+        records.append(
+            {
+                "stem": str(stem),
+                "T_c2w": T_c2w.astype(np.float32),
+                "K": K.astype(np.float64),
+                "width": cam.get("width"),
+                "height": cam.get("height"),
+            }
+        )
+    return records
+
+
+def save_chunk_rrd(
+    *,
+    output_path: Path,
+    scene_dir: Path,
+    chunk_id: int,
+    stems: Sequence[str],
+    meta: Dict[str, object],
+    depth_stride: int,
+    max_points: int,
+    point_radius: float,
+    camera_axis_size: float,
+) -> Dict[str, object]:
+    import rerun as rr
+
+    from geoff3d.slrf.rrd_writer import (
+        estimate_axis_size,
+        log_camera_axes,
+        log_camera_labels,
+        log_points,
+        log_view_coordinates,
+        rr_disconnect_compat,
+        rr_init_save_compat,
+        send_blueprint,
+    )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    points, colors, frame_meta, failed_frames = build_chunk_input_point_cloud(
+        stems=stems,
+        meta=meta,
+        depth_stride=int(depth_stride),
+        max_points=int(max_points),
+        seed=930001 + int(chunk_id),
+    )
+    camera_records = camera_records_for_stems(meta, stems)
+    axis_size = estimate_axis_size(
+        [points], explicit=float(camera_axis_size)
+    )
+
+    scene_name = sanitize_name(scene_dir.resolve().name)
+    recording_id = f"{scene_name}_input_chunk_{int(chunk_id):04d}"
+    rr_init_save_compat(
+        app_id="geoff3d_chunk_input_export",
+        recording_id=recording_id,
+        save_rrd=output_path,
+    )
+    try:
+        log_view_coordinates("RIGHT_HAND_Z_UP")
+        send_blueprint(background=(255, 255, 255), hide_grid=False)
+        log_points(
+            "world/input_depth_points",
+            points=points,
+            colors=colors,
+            radius=float(point_radius),
+        )
+        log_camera_axes(
+            "world/input_cameras/axes",
+            cams=camera_records,
+            axis_size=float(axis_size),
+            radius=0.0,
+            colors_xyz=(
+                (255, 0, 0),
+                (0, 220, 0),
+                (40, 80, 255),
+            ),
+        )
+        log_camera_labels(
+            "world/input_cameras/labels",
+            cams=camera_records,
+            color=(20, 20, 20),
+        )
+
+        for camera in camera_records:
+            stem = str(camera["stem"])
+            T_c2w = np.asarray(camera["T_c2w"], dtype=np.float64)
+            entity = f"world/input_cameras/{sanitize_name(stem)}"
+            rr.log(
+                entity,
+                rr.Transform3D(
+                    translation=T_c2w[:3, 3],
+                    mat3x3=T_c2w[:3, :3],
+                ),
+                static=True,
+            )
+            width = camera.get("width")
+            height = camera.get("height")
+            if width is not None and height is not None:
+                rr.log(
+                    entity,
+                    rr.Pinhole(
+                        image_from_camera=np.asarray(camera["K"], dtype=np.float64),
+                        resolution=[int(width), int(height)],
+                        camera_xyz=rr.ViewCoordinates.RDF,
+                        image_plane_distance=float(axis_size),
+                    ),
+                    static=True,
+                )
+
+        metadata = {
+            "chunk_id": int(chunk_id),
+            "scene_dir": str(scene_dir),
+            "stems": [str(stem) for stem in stems],
+            "num_cameras": int(len(camera_records)),
+            "num_points": int(points.shape[0]),
+            "depth_stride": int(depth_stride),
+            "max_points": int(max_points),
+            "camera_axis_size": float(axis_size),
+            "failed_depth_frames": failed_frames,
+            "frames": frame_meta,
+        }
+        rr.log(
+            "world/chunk_metadata",
+            rr.TextDocument(
+                json.dumps(metadata, ensure_ascii=False, indent=2)
+            ),
+            static=True,
+        )
+    finally:
+        rr_disconnect_compat()
+
+    return {
+        "path": str(output_path),
+        "num_points": int(points.shape[0]),
+        "num_cameras": int(len(camera_records)),
+        "failed_depth_frames": failed_frames,
+    }
+
+
+def relative_output_path(path: Optional[Path], output_dir: Path) -> Optional[str]:
+    if path is None:
+        return None
+    try:
+        return str(path.relative_to(output_dir))
+    except ValueError:
+        return str(path)
+
+
 def export_chunk_lists(
     *,
     output_dir: Path,
@@ -329,9 +804,26 @@ def export_chunk_lists(
     selected_input_count: int,
     skipped_frames: Sequence[Dict[str, str]],
     original_image_paths: Dict[str, str],
+    save_montages: bool,
+    montage_width: int,
+    montage_height: int,
+    save_rrd: bool,
+    rrd_depth_stride: int,
+    rrd_max_points: int,
+    rrd_point_radius: float,
+    rrd_camera_axis_size: float,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     remove_stale_chunk_lists(output_dir)
+
+    montage_dir = output_dir / "chunk_montages"
+    rrd_dir = output_dir / "chunk_rrd"
+    if save_montages:
+        montage_dir.mkdir(parents=True, exist_ok=True)
+        remove_stale_chunk_artifacts(montage_dir, ".jpg")
+    if save_rrd:
+        rrd_dir.mkdir(parents=True, exist_ok=True)
+        remove_stale_chunk_artifacts(rrd_dir, ".rrd")
 
     stems = [str(stem) for stem in meta["stems"]]
     image_paths = {
@@ -350,6 +842,7 @@ def export_chunk_lists(
         overlap_indices = [
             int(index) for index in chunk.get("overlap_indices", [])
         ]
+        chunk_stems = [stems[index] for index in indices]
         image_names = names_for_indices(indices, stems, image_paths)
         core_image_names = names_for_indices(core_indices, stems, image_paths)
         overlap_image_names = names_for_indices(
@@ -365,26 +858,80 @@ def export_chunk_lists(
             encoding="utf-8",
         )
 
-        chunk_records.append(
-            {
-                "chunk_id": chunk_id,
-                "source_chunk_id": int(
-                    chunk.get("source_chunk_id", chunk_id)
-                ),
-                "cell_key": [int(value) for value in chunk.get("cell_key", ())],
-                "adjacent_chunk_ids": [
-                    int(value)
-                    for value in chunk.get("adjacent_chunk_ids", [])
-                ],
-                "image_count": len(image_names),
-                "core_image_count": len(core_image_names),
-                "overlap_image_count": len(overlap_image_names),
-                "images": image_names,
-                "core_images": core_image_names,
-                "overlap_images": overlap_image_names,
-                "list_file": list_path.name,
-            }
-        )
+        montage_path: Optional[Path] = None
+        montage_error: Optional[str] = None
+        if save_montages:
+            montage_path = montage_dir / f"chunk_{chunk_id:04d}.jpg"
+            try:
+                save_chunk_montage(
+                    output_path=montage_path,
+                    image_paths=[Path(image_paths[stem]) for stem in chunk_stems],
+                    image_names=image_names,
+                    width=int(montage_width),
+                    height=int(montage_height),
+                )
+            except Exception as exc:
+                montage_error = str(exc)
+                montage_path = None
+                print(
+                    f"[WARN] Failed to save montage for chunk {chunk_id}: {exc}"
+                )
+
+        rrd_path: Optional[Path] = None
+        rrd_detail: Optional[Dict[str, object]] = None
+        rrd_error: Optional[str] = None
+        if save_rrd:
+            rrd_path = rrd_dir / f"chunk_{chunk_id:04d}.rrd"
+            try:
+                rrd_detail = save_chunk_rrd(
+                    output_path=rrd_path,
+                    scene_dir=scene_dir,
+                    chunk_id=chunk_id,
+                    stems=chunk_stems,
+                    meta=meta,
+                    depth_stride=int(rrd_depth_stride),
+                    max_points=int(rrd_max_points),
+                    point_radius=float(rrd_point_radius),
+                    camera_axis_size=float(rrd_camera_axis_size),
+                )
+            except Exception as exc:
+                rrd_error = str(exc)
+                rrd_path = None
+                print(
+                    f"[WARN] Failed to save RRD for chunk {chunk_id}: {exc}"
+                )
+
+        record: Dict[str, object] = {
+            "chunk_id": chunk_id,
+            "source_chunk_id": int(
+                chunk.get("source_chunk_id", chunk_id)
+            ),
+            "cell_key": [int(value) for value in chunk.get("cell_key", ())],
+            "adjacent_chunk_ids": [
+                int(value)
+                for value in chunk.get("adjacent_chunk_ids", [])
+            ],
+            "image_count": len(image_names),
+            "core_image_count": len(core_image_names),
+            "overlap_image_count": len(overlap_image_names),
+            "images": image_names,
+            "core_images": core_image_names,
+            "overlap_images": overlap_image_names,
+            "list_file": list_path.name,
+            "montage_file": relative_output_path(montage_path, output_dir),
+            "rrd_file": relative_output_path(rrd_path, output_dir),
+        }
+        if montage_error is not None:
+            record["montage_error"] = montage_error
+        if rrd_detail is not None:
+            record["rrd_num_points"] = int(rrd_detail["num_points"])
+            record["rrd_num_cameras"] = int(rrd_detail["num_cameras"])
+            record["rrd_failed_depth_frames"] = list(
+                rrd_detail.get("failed_depth_frames", [])
+            )
+        if rrd_error is not None:
+            record["rrd_error"] = rrd_error
+        chunk_records.append(record)
 
     all_indices = set(range(len(stems)))
     unassigned_indices = sorted(all_indices - covered_indices)
@@ -421,6 +968,11 @@ def export_chunk_lists(
         "total_dropped_seam_images": int(
             grid_meta.get("total_dropped_seam_images", 0)
         ),
+        "save_chunk_montages": bool(save_montages),
+        "montage_resolution": [int(montage_width), int(montage_height)],
+        "save_chunk_rrd": bool(save_rrd),
+        "rrd_depth_stride": int(rrd_depth_stride),
+        "rrd_max_points_per_chunk": int(rrd_max_points),
         "all_valid_images": names_for_indices(
             range(len(stems)), stems, image_paths
         ),
@@ -531,6 +1083,14 @@ def main() -> None:
         selected_input_count=selected_input_count,
         skipped_frames=skipped_frames,
         original_image_paths=original_image_paths,
+        save_montages=bool(args.save_chunk_montages),
+        montage_width=int(args.montage_width),
+        montage_height=int(args.montage_height),
+        save_rrd=bool(args.save_chunk_rrd),
+        rrd_depth_stride=int(args.rrd_depth_stride),
+        rrd_max_points=int(args.rrd_max_points),
+        rrd_point_radius=float(args.rrd_point_radius),
+        rrd_camera_axis_size=float(args.rrd_camera_axis_size),
     )
 
     chunk_sizes = [len(chunk.get("indices", [])) for chunk in chunks]
@@ -543,6 +1103,14 @@ def main() -> None:
         f"chunk_size_min={min(chunk_sizes)}, "
         f"chunk_size_max={max(chunk_sizes)}, output={output_dir}"
     )
+    if args.save_chunk_montages:
+        print(
+            "Chunk montages: "
+            f"{output_dir / 'chunk_montages'} "
+            f"({args.montage_width}x{args.montage_height})"
+        )
+    if args.save_chunk_rrd:
+        print(f"Chunk RRD files: {output_dir / 'chunk_rrd'}")
     print(f"Manifest: {manifest_path}")
 
 
