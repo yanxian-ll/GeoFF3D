@@ -7,6 +7,9 @@ This utility reuses the same prior-footprint spatial chunking path as
 model inference. The input scene is expected to contain matching ``images/``,
 ``cams/``, and metric ``depth/`` files.
 
+Frames whose depth maps cannot provide enough valid footprint points are
+skipped before spatial chunking.
+
 Example:
     python scripts/export_chunk_image_lists.py /path/to/scene 32
 """
@@ -15,8 +18,11 @@ from __future__ import annotations
 
 import argparse
 import json
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, Iterable, List, Sequence, Tuple
+
+import numpy as np
 
 from geoff3d.slrf.chunking import (
     build_spatial_chunks,
@@ -24,7 +30,13 @@ from geoff3d.slrf.chunking import (
     order_spatial_chunks,
     spatial_axis_indices,
 )
-from geoff3d.slrf.footprint_estimation import estimate_footprints_from_prior
+from geoff3d.slrf.footprint_estimation import (
+    FOOTPRINT_MIN_POINTS,
+    FOOTPRINT_QUANTILE_MAX,
+    FOOTPRINT_QUANTILE_MIN,
+    FOOTPRINT_SAMPLE_STRIDE,
+    _prior_footprint_worker,
+)
 from geoff3d.slrf.scene_io import build_views_from_scene
 
 
@@ -52,6 +64,24 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Output directory. Defaults to <scene_dir>/chunk_image_lists."
         ),
+    )
+    parser.add_argument(
+        "--num-views",
+        type=int,
+        default=0,
+        help="Maximum number of selected input images. 0 keeps all images.",
+    )
+    parser.add_argument(
+        "--start",
+        type=int,
+        default=0,
+        help="Start index in the naturally sorted image sequence.",
+    )
+    parser.add_argument(
+        "--stride",
+        type=int,
+        default=1,
+        help="Select every N-th image after applying --start.",
     )
     parser.add_argument(
         "--min-images-per-chunk",
@@ -91,6 +121,12 @@ def parse_args() -> argparse.Namespace:
 def validate_args(args: argparse.Namespace) -> None:
     if args.max_images_per_chunk <= 0:
         raise ValueError("max_images_per_chunk must be positive.")
+    if args.num_views < 0:
+        raise ValueError("num_views cannot be negative.")
+    if args.start < 0:
+        raise ValueError("start cannot be negative.")
+    if args.stride <= 0:
+        raise ValueError("stride must be positive.")
     if args.min_images_per_chunk <= 0:
         raise ValueError("min_images_per_chunk must be positive.")
     if args.min_images_per_chunk > args.max_images_per_chunk:
@@ -140,6 +176,140 @@ def names_for_indices(
     return names
 
 
+def filter_meta_by_indices(
+    meta: Dict[str, object],
+    indices: Sequence[int],
+) -> Dict[str, object]:
+    filtered = dict(meta)
+    original_stems = [str(stem) for stem in meta.get("stems", [])]
+    selected_stems = [original_stems[int(index)] for index in indices]
+    selected_set = set(selected_stems)
+    filtered["stems"] = selected_stems
+
+    for key in ("image_paths", "depth_paths", "cam_paths", "cams"):
+        value = meta.get(key)
+        if isinstance(value, dict):
+            filtered[key] = {
+                str(stem): item
+                for stem, item in value.items()
+                if str(stem) in selected_set
+            }
+
+    filtered["num_cam_priors"] = int(
+        sum(
+            1
+            for stem in selected_stems
+            if stem in filtered.get("cams", {})
+        )
+    )
+    filtered["num_depth_priors"] = int(
+        sum(
+            1
+            for stem in selected_stems
+            if stem in filtered.get("depth_paths", {})
+        )
+    )
+    return filtered
+
+
+def estimate_footprints_and_skip_invalid(
+    *,
+    meta: Dict[str, object],
+    axis_indices: Tuple[int, ...],
+    workers: int,
+) -> Tuple[Dict[str, object], Dict[str, object], List[Dict[str, str]]]:
+    stems = [str(stem) for stem in meta["stems"]]
+    cams = meta.get("cams", {})
+    depth_paths = meta.get("depth_paths", {})
+    jobs: List[Tuple[object, ...]] = []
+
+    for index, stem in enumerate(stems):
+        cam = cams.get(stem) if isinstance(cams, dict) else None
+        depth_path = (
+            depth_paths.get(stem)
+            if isinstance(depth_paths, dict)
+            else None
+        )
+        if cam is None or not depth_path:
+            raise ValueError(
+                f"Cannot estimate prior footprint for {stem}: "
+                "missing camera or depth."
+            )
+        jobs.append(
+            (
+                index,
+                str(depth_path),
+                np.asarray(cam["K"]),
+                np.asarray(cam["T_c2w"]),
+                cam.get("width"),
+                cam.get("height"),
+                int(meta["target_h"]),
+                int(meta["target_w"]),
+                axis_indices,
+                FOOTPRINT_SAMPLE_STRIDE,
+                FOOTPRINT_MIN_POINTS,
+                FOOTPRINT_QUANTILE_MIN,
+                FOOTPRINT_QUANTILE_MAX,
+            )
+        )
+
+    if int(workers) > 1 and len(jobs) > 1:
+        with ProcessPoolExecutor(max_workers=int(workers)) as pool:
+            results = list(pool.map(_prior_footprint_worker, jobs))
+    else:
+        results = [_prior_footprint_worker(job) for job in jobs]
+
+    valid_indices: List[int] = []
+    centers: List[np.ndarray] = []
+    bbox_mins: List[np.ndarray] = []
+    bbox_maxs: List[np.ndarray] = []
+    skipped: List[Dict[str, str]] = []
+
+    for index, center, bbox_min, bbox_max, status in results:
+        stem = stems[int(index)]
+        if (
+            status != "ok"
+            or center is None
+            or bbox_min is None
+            or bbox_max is None
+        ):
+            skipped.append({"stem": stem, "reason": str(status)})
+            continue
+
+        valid_indices.append(int(index))
+        centers.append(np.asarray(center, dtype=np.float64))
+        bbox_mins.append(np.asarray(bbox_min, dtype=np.float64))
+        bbox_maxs.append(np.asarray(bbox_max, dtype=np.float64))
+
+    if not valid_indices:
+        raise RuntimeError(
+            "Prior footprint estimation did not produce any valid frames."
+        )
+
+    filtered_meta = filter_meta_by_indices(meta, valid_indices)
+    estimated = {
+        "centers": np.stack(centers, axis=0),
+        "bbox_mins": np.stack(bbox_mins, axis=0),
+        "bbox_maxs": np.stack(bbox_maxs, axis=0),
+        "meta": {
+            "estimation": "prior",
+            "coordinate_axes": list(axis_indices),
+            "source_counts": {"prior": len(valid_indices)},
+            "sources": ["prior"] * len(valid_indices),
+            "sample_stride": FOOTPRINT_SAMPLE_STRIDE,
+            "min_points": FOOTPRINT_MIN_POINTS,
+            "quantile_min": FOOTPRINT_QUANTILE_MIN,
+            "quantile_max": FOOTPRINT_QUANTILE_MAX,
+            "workers": int(workers),
+            "num_input_frames": len(stems),
+            "num_valid_frames": len(valid_indices),
+            "num_skipped_frames": len(skipped),
+        },
+    }
+    filtered_meta["estimated_footprints"] = estimated
+    return filtered_meta, estimated, skipped
+
+
 def remove_stale_chunk_lists(output_dir: Path) -> None:
     for path in output_dir.glob("chunk_*.txt"):
         if path.is_file():
@@ -156,6 +326,9 @@ def export_chunk_lists(
     scene_dir: Path,
     max_images_per_chunk: int,
     min_images_per_chunk: int,
+    selected_input_count: int,
+    skipped_frames: Sequence[Dict[str, str]],
+    original_image_paths: Dict[str, str],
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     remove_stale_chunk_lists(output_dir)
@@ -216,6 +389,17 @@ def export_chunk_lists(
     all_indices = set(range(len(stems)))
     unassigned_indices = sorted(all_indices - covered_indices)
     unassigned_core_indices = sorted(all_indices - covered_core_indices)
+    skipped_records = []
+    for item in skipped_frames:
+        stem = str(item["stem"])
+        path = original_image_paths.get(stem)
+        skipped_records.append(
+            {
+                "stem": stem,
+                "image": Path(path).name if path else stem,
+                "reason": str(item["reason"]),
+            }
+        )
 
     manifest = {
         "scene_dir": str(scene_dir),
@@ -228,14 +412,19 @@ def export_chunk_lists(
         "auto_core_target_size": int(
             grid_meta.get("auto_core_target_size", 0)
         ),
-        "num_input_images": len(stems),
+        "num_selected_input_images": int(selected_input_count),
+        "num_valid_input_images": len(stems),
+        "num_skipped_invalid_depth_images": len(skipped_records),
         "num_chunks": len(chunks),
         "num_unique_images_in_chunks": len(covered_indices),
         "num_unique_core_images": len(covered_core_indices),
         "total_dropped_seam_images": int(
             grid_meta.get("total_dropped_seam_images", 0)
         ),
-        "all_images": names_for_indices(range(len(stems)), stems, image_paths),
+        "all_valid_images": names_for_indices(
+            range(len(stems)), stems, image_paths
+        ),
+        "skipped_invalid_depth_images": skipped_records,
         "unassigned_images": names_for_indices(
             unassigned_indices, stems, image_paths
         ),
@@ -248,6 +437,15 @@ def export_chunk_lists(
     manifest_path = output_dir / "chunk_image_names.json"
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    skipped_path = output_dir / "skipped_invalid_depth_images.txt"
+    skipped_path.write_text(
+        "".join(
+            f"{record['image']}\t{record['reason']}\n"
+            for record in skipped_records
+        ),
         encoding="utf-8",
     )
     return manifest_path
@@ -272,21 +470,32 @@ def main() -> None:
         images_dir="images",
         cams_dir="cams",
         depth_dir="depth",
-        num_views=0,
-        start=0,
-        stride=1,
+        num_views=int(args.num_views),
+        start=int(args.start),
+        stride=int(args.stride),
         max_image_size=int(args.max_image_size),
         patch_size=int(args.patch_size),
         show_progress=not bool(args.quiet),
     )
     require_matching_priors(meta)
 
+    selected_input_count = len(meta["stems"])
+    original_image_paths = {
+        str(stem): str(path)
+        for stem, path in dict(meta.get("image_paths", {})).items()
+    }
     axes = infer_spatial_axes(meta)
-    meta["estimated_footprints"] = estimate_footprints_from_prior(
+    meta, _, skipped_frames = estimate_footprints_and_skip_invalid(
         meta=meta,
         axis_indices=spatial_axis_indices(axes),
         workers=int(args.footprint_workers),
     )
+    if skipped_frames:
+        print(
+            "[WARN] Skipped frames with invalid footprint depth: "
+            f"{len(skipped_frames)}/{selected_input_count}. "
+            f"First skipped={skipped_frames[:8]}"
+        )
 
     chunks, grid_meta = build_spatial_chunks(
         meta=meta,
@@ -319,12 +528,18 @@ def main() -> None:
         scene_dir=scene_dir,
         max_images_per_chunk=int(args.max_images_per_chunk),
         min_images_per_chunk=int(args.min_images_per_chunk),
+        selected_input_count=selected_input_count,
+        skipped_frames=skipped_frames,
+        original_image_paths=original_image_paths,
     )
 
     chunk_sizes = [len(chunk.get("indices", [])) for chunk in chunks]
     print(
         "Exported chunk image lists: "
-        f"images={len(meta['stems'])}, chunks={len(chunks)}, axes={axes}, "
+        f"selected_images={selected_input_count}, "
+        f"valid_images={len(meta['stems'])}, "
+        f"skipped_images={len(skipped_frames)}, "
+        f"chunks={len(chunks)}, axes={axes}, "
         f"chunk_size_min={min(chunk_sizes)}, "
         f"chunk_size_max={max(chunk_sizes)}, output={output_dir}"
     )
