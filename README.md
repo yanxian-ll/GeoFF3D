@@ -118,34 +118,6 @@ bash bash_scripts/run_slrf/geoff3d.sh \
   max_chunk_size=24
 ```
 
-### Export spatial chunk image lists
-
-To run the same prior-depth footprint-tree partition without model inference,
-provide the scene directory and the maximum total image count per chunk:
-
-```bash
-python scripts/export_chunk_image_lists.py \
-  /path/to/scene \
-  32
-```
-
-The scene must contain matching `images/`, `cams/*.txt`, and metric
-`depth/*.exr` files. No checkpoint or GPU is required. Outputs are written to
-`<scene_dir>/chunk_image_lists/` by default:
-
-```text
-chunk_0000.txt
-chunk_0001.txt
-...
-chunk_image_names.json
-```
-
-Each text file contains all image file names in that chunk, including overlap
-images. The JSON manifest additionally records core images, overlap images,
-adjacency, and unassigned images. Use `--output-dir` to change the destination,
-`--footprint-workers` to parallelize depth-footprint estimation, and
-`--min-images-per-chunk 8` to match the current `configs/slrf.yaml` minimum.
-
 ## Benchmarking
 
 The private reproducibility workspace under `benchmarking/` contains unified runners
