@@ -11,7 +11,7 @@ Frames whose depth maps cannot provide enough valid footprint points are
 skipped before spatial chunking.
 
 Example:
-    python scripts/export_chunk_image_lists.py /path/to/scene 32
+    python scripts/export_chunks.py input_scene_dir 32 --output-dir ./output
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageOps
+from tqdm import tqdm
 
 from geoff3d.slrf.chunking import (
     build_spatial_chunks,
@@ -726,7 +727,7 @@ def save_chunk_rrd(
             color=(20, 20, 20),
         )
 
-        for camera in camera_records:
+        for camera in tqdm(camera_records, desc="Logging camera transforms"):
             stem = str(camera["stem"])
             T_c2w = np.asarray(camera["T_c2w"], dtype=np.float64)
             entity = f"world/input_cameras/{sanitize_name(stem)}"
@@ -835,7 +836,7 @@ def export_chunk_lists(
     covered_indices = set()
     covered_core_indices = set()
 
-    for chunk in chunks:
+    for chunk in tqdm(chunks, desc="Processing chunks"):
         chunk_id = int(chunk["chunk_id"])
         indices = [int(index) for index in chunk.get("indices", [])]
         core_indices = [int(index) for index in chunk.get("core_indices", [])]
@@ -937,7 +938,7 @@ def export_chunk_lists(
     unassigned_indices = sorted(all_indices - covered_indices)
     unassigned_core_indices = sorted(all_indices - covered_core_indices)
     skipped_records = []
-    for item in skipped_frames:
+    for item in tqdm(skipped_frames, desc="Processing skipped frames"):
         stem = str(item["stem"])
         path = original_image_paths.get(stem)
         skipped_records.append(
