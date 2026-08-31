@@ -1,8 +1,10 @@
-# GeoFF3D
+# GeoFF3D: Coordinate-Anchored Feed-Forward Reconstruction for Large-Scale UAV Mapping
+
+[[arXiv Paper](https://arxiv.org/abs/2608.28288)]
 
 ![GeoFF3D SLRF qualitative results](assets/images/geoff3d_slrf_qualitative_result.png)
 
-GeoFF3D is a scalable feed-forward framework for large-scale UAV 3D reconstruction. It combines coordinate-anchored reconstruction with spatial chunking and hierarchical aggregation, and supports camera, depth, translation, and rotation priors.
+GeoFF3D is a scalable feed-forward framework for large-scale UAV 3D reconstruction. It predicts camera poses and dense geometry directly in a gravity-aligned, Z-up metric frame by anchoring reconstruction to georeferenced camera translations and optional geometric priors. Its Spatial Large-scale Reconstruction Framework (SLRF) partitions images into overlapping spatial chunks, propagates shared-view priors, and hierarchically aggregates local reconstructions.
 
 ## Installation
 
@@ -147,13 +149,16 @@ See [LICENSE](LICENSE).
 
 ## Citation
 
-If this repository is useful to your research, please cite the [UAVFF3D paper](https://arxiv.org/abs/2605.17942):
+If this repository is useful to your research, please cite the [GeoFF3D paper](https://arxiv.org/abs/2608.28288):
 
 ```bibtex
-@article{yang2026uavff3d,
-  title={UAVFF3D: A Geometry-Aware Benchmark for Feed-Forward UAV 3D Reconstruction},
-  author={Yang, Xiang and Wang, Yongli and Li, HaiFeng and Zhang, Yunsheng},
-  journal={arXiv preprint arXiv:2605.17942},
-  year={2026}
+@misc{yang2026geoff3dcoordinateanchoredfeedforwardreconstruction,
+  title={GeoFF3D: Coordinate-Anchored Feed-Forward Reconstruction for Large-Scale UAV Mapping},
+  author={Xiang Yang and Yongli Wang and Yunsheng Zhang},
+  year={2026},
+  eprint={2608.28288},
+  archivePrefix={arXiv},
+  primaryClass={cs.CV},
+  url={https://arxiv.org/abs/2608.28288},
 }
 ```
